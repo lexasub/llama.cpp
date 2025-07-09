@@ -14,16 +14,20 @@
 // Такой двухпроходный подход позволяет обрабатывать датасеты, значительно превышающие
 // объем доступной оперативной памяти.
 
-#include "dataset-to-gguf/gguf-converter.h" // Включаем наш новый класс GGUFConverter
-#include "dataset-to-gguf/gguf-reader.h"    // Включаем наш новый класс GGUFReader
-#include "common.h"                         // Для общих утилит, если требуются (например, common_params)
-#include "llama.h"                          // Для llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
-
+#include <algorithm>  // Для std::min
+#include <array>      // Для std::array
+#include <cinttypes>
 #include <iostream>
+#include <limits>  // Для std::numeric_limits
+#include <memory>  // Для std::unique_ptr
 #include <string>
 #include <vector>
-#include <memory> // Для std::unique_ptr
-#include <limits> // Для std::numeric_limits
+
+#include "common.h"                               // Для общих утилит, если требуются (например, common_params)
+#include "dataset-to-gguf/gguf-converter.h"       // Включаем наш новый класс GGUFConverter
+#include "dataset-to-gguf/gguf-reader.h"          // Включаем наш новый класс GGUFReader
+#include "dataset-to-gguf/parquet-reader.h"  // Включаем ParquetDataReader
+#include "llama.h"  // Для llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
 
 // Структура для хранения параметров командной строки
 struct training_data_params {
@@ -34,6 +38,8 @@ struct training_data_params {
     bool        pre_tokenized = false;                           // Флаг: если true, входные данные уже токенизированы (токены в виде чисел)
     std::string input_type    = "text";                          // Тип входных данных (например, "text", "parquet")
     bool        do_preview    = false;                           // Флаг: если true, выполнить предварительный просмотр
+    int32_t     preview_count = 1;                               // Количество последовательностей для предварительного просмотра
+    bool        detokenize_preview = false;                      // Флаг: если true, детокенизировать предварительный просмотр
 };
 
 // Предварительная декларация функции парсинга параметров
@@ -58,6 +64,16 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
             params.input_type = argv[++i];
         } else if (arg == "--preview") {
             params.do_preview = true; // Включаем предварительный просмотр
+        } else if (arg == "--preview-count") {
+            params.preview_count = std::stoi(argv[++i]);
+            if (params.preview_count <= 0) {
+                fprintf(stderr, "error: --preview-count must be a positive integer.\n");
+                exit(1);
+            }
+            params.do_preview = true; // Включаем предварительный просмотр, если указан count
+        } else if (arg == "--detokenize-preview") {
+            params.detokenize_preview = true;
+            params.do_preview = true; // Включаем предварительный просмотр, если указана детокенизация
         } else if (arg == "-h" || arg == "--help") {
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
@@ -68,7 +84,9 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
             printf("  -l, --max-seq-len     max sequence length (default: %d)\n", params.max_seq_len);
             printf("  -p, --pre-tokenized   input file contains pre-tokenized data (space-separated token IDs)\n");
             printf("  -t, --input-type      type of input data (e.g., 'text', 'parquet') (default: %s)\n", params.input_type.c_str());
-            printf("  --preview             read and print metadata and first sequence from the output GGUF file\n");
+            printf("  --preview             read and print metadata and first sequence from the output GGUF file (enables preview)\n");
+            printf("  --preview-count <N>   number of sequences to preview (default: 1, implies --preview)\n");
+            printf("  --detokenize-preview  detokenize previewed sequences (implies --preview)\n");
             exit(0);
         } else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -89,7 +107,12 @@ int main(int argc, char **argv) {
     printf("  Max sequence length: %d\n", params_raw.max_seq_len);
     printf("  Pre-tokenized input: %s\n", params_raw.pre_tokenized ? "Yes" : "No");
     printf("  Input type: %s\n", params_raw.input_type.c_str());
-    printf("  Do preview: %s\n\n", params_raw.do_preview ? "Yes" : "No");
+    printf("  Do preview: %s\n", params_raw.do_preview ? "Yes" : "No");
+    if (params_raw.do_preview) {
+        printf("  Preview count: %d\n", params_raw.preview_count);
+        printf("  Detokenize preview: %s\n", params_raw.detokenize_preview ? "Yes" : "No");
+    }
+    printf("\n");
 
     // Инициализация llama.cpp
     llama_backend_init();
@@ -103,6 +126,31 @@ int main(int argc, char **argv) {
         llama_backend_free();
         return 1;
     }
+
+    // --- Диагностический тест: Чтение файла модели токенизатора с помощью GGUFReader ---
+    printf("--- Diagnostic Test: Reading tokenizer model GGUF file ---\n");
+    try {
+        GGUFReader tokenizer_model_reader(params_raw.model_path);
+        if (tokenizer_model_reader.is_initialized()) {
+            printf("  Tokenizer Model GGUF file opened successfully.\n");
+            printf("  Tokenizer Model Name: %s\n", tokenizer_model_reader.get_metadata_str("general.name", "N/A").c_str());
+            printf("  Tokenizer Model Architecture: %s\n", tokenizer_model_reader.get_metadata_str("general.architecture", "N/A").c_str());
+            printf("  Tokenizer Model Tensor Count: %ld\n", tokenizer_model_reader.get_tensor_count());
+            printf("  Diagnostic Test: Tokenizer Model GGUF read successful.\n");
+        } else {
+            fprintf(stderr, "error: Diagnostic Test: Tokenizer Model GGUF read failed to initialize.\n");
+            llama_model_free(model); // Освобождаем модель перед выходом
+            llama_backend_free();
+            return 1;
+        }
+    } catch (const std::runtime_error& e) {
+        fprintf(stderr, "error: Diagnostic Test: Tokenizer Model GGUF read failed: %s\n", e.what());
+        llama_model_free(model); // Освобождаем модель перед выходом
+        llama_backend_free();
+        return 1;
+    }
+    printf("--- End of Diagnostic Test ---\n\n");
+
 
     // Подготовка параметров для GGUFConverter
     ConvertParams convert_params;
@@ -146,20 +194,38 @@ int main(int argc, char **argv) {
 
             int64_t tensor_count = reader.get_tensor_count();
             if (tensor_count > 0) {
-                printf("  First Sequence (training.tensor.0):\n");
-                std::vector<llama_token> first_sequence_tokens;
-                if (reader.read_tensor_data(0, first_sequence_tokens)) {
-                    printf("    Length: %zu tokens\n", first_sequence_tokens.size());
-                    printf("    Tokens: [");
-                    for (size_t i = 0; i < std::min((size_t)10, first_sequence_tokens.size()); ++i) { // Выводим до 10 токенов
-                        printf("%d%s", first_sequence_tokens[i], (i == std::min((size_t)10, first_sequence_tokens.size()) - 1) ? "" : ", ");
+                // Выводим N первых последовательностей
+                for (int64_t i = 0; i < std::min((int64_t)params_raw.preview_count, tensor_count); ++i) {
+                    printf("  Sequence (training.tensor.%" PRId64 "):\n", i);
+                    std::vector<llama_token> sequence_tokens;
+                    if (reader.read_tensor_data(i, sequence_tokens)) {
+                        printf("    Length: %zu tokens\n", sequence_tokens.size());
+                        printf("    Tokens: [");
+                        for (size_t j = 0; j < std::min((size_t)10, sequence_tokens.size()); ++j) { // Выводим до 10 токенов
+                            printf("%d%s", sequence_tokens[j], (j == std::min((size_t)10, sequence_tokens.size()) - 1) ? "" : ", ");
+                        }
+                        if (sequence_tokens.size() > 10) {
+                            printf("...");
+                        }
+                        printf("]\n");
+
+                        if (params_raw.detokenize_preview) {
+                            // Детокенизация
+                            std::string detokenized_text = "";
+                            // Буфер для одного токена
+                            std::array<char, 256> piece_buf; // Достаточно большой буфер для одного токена
+                            for (llama_token token : sequence_tokens) {
+                                int n_chars = llama_token_to_piece(llama_model_get_vocab(model), token, piece_buf.data(), piece_buf.size(), 1, false);
+                                if (n_chars > 0) {
+                                    detokenized_text.append(piece_buf.data(), n_chars);
+                                }
+                            }
+                            printf("    Detokenized: \"%s\"\n", detokenized_text.c_str());
+                        }
+
+                    } else {
+                        fprintf(stderr, "    Error: Could not read data for sequence %" PRId64 ".\n", i);
                     }
-                    if (first_sequence_tokens.size() > 10) {
-                        printf("...");
-                    }
-                    printf("]\n");
-                } else {
-                    fprintf(stderr, "    Error: Could not read data for first sequence.\n");
                 }
             } else {
                 printf("  No sequences found in the GGUF file.\n");

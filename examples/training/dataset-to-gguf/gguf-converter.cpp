@@ -10,6 +10,7 @@
 #include "gguf-file.h"    // Для GGUFFile
 #include "gguf-writer.h"  // Для GGUFWriter
 #include "llama.h"        // Для llama_model_free, llama_backend_free
+#include "parquet-reader.h"
 #include "text-reader.h"
 
 // Метод для выполнения процесса конвертации.
@@ -18,6 +19,8 @@ bool GGUFConverter::convert(const ConvertParams& params) {
     std::unique_ptr<DatasetReader> reader;
     if (params.input_type == "text") {
         reader = std::make_unique<TextDatasetReader>(params.model, params.max_seq_len, params.pre_tokenized);
+    } else if (params.input_type == "parquet") {
+        reader = std::make_unique<ParquetDatasetReader>(params.model, params.max_seq_len, params.pre_tokenized);
     } else {
         fprintf(stderr, "error: Unsupported input type: %s\n", params.input_type.c_str());
         return false;
