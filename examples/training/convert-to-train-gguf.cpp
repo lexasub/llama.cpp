@@ -1,29 +1,31 @@
-// Утилита для конвертации текстового датасета в формат GGUF для обучения моделей в llama.cpp.
+// Главная утилита для конвертации текстового датасета в формат GGUF для обучения моделей в llama.cpp.
 //
 // Логика работы:
-// 1. Загружает модель-токенизатор.
-// 2. Проходит по входному текстовому файлу (первый проход) для сбора метаданных:
-//    - Токенизирует каждую строку.
-//    - Сохраняет длину каждой последовательности токенов (с учетом обрезки по --max-seq-len).
-// 3. Создает GGUF-файл и записывает в него все собранные метаданные.
-// 4. Проходит по входному файлу второй раз для записи данных:
-//    - Токенизирует каждую строку.
-//    - Записывает каждую последовательность токенов как отдельный тензор в GGUF-файл.
+// 1. Парсит аргументы командной строки.
+// 2. Загружает модель-токенизатор.
+// 3. Использует DataReader для первого прохода по входным данным, чтобы собрать метаданные (длины последовательностей).
+// 4. Использует класс GGUFWriter для создания GGUF-файла и записи в него всех собранных метаданных.
+// 5. Использует DataReader для второго прохода по входным данным, чтобы добавить каждую последовательность
+//    как отдельный тензор в GGUF-файл через GGUFWriter.
 //
 // Такой двухпроходный подход позволяет обрабатывать датасеты, значительно превышающие
 // объем доступной оперативной памяти.
 
+#include <inttypes.h>  // Для PRIu64
+
+#include <cstdio>      // Для snprintf
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <memory>  // Для std::unique_ptr
 #include <string>
 #include <vector>
 
-#include "../../src/llama-model.h"
-#include "common.h"
-#include "ggml.h"
-#include "gguf.h"
-#include "llama.h"
+#include "common.h"                            // Для общих утилит, если требуются (например, common_params)
+#include "dataset-to-gguf/dataset-reader.h"
+#include "dataset-to-gguf/gguf-file.h"         // Включаем класс GGUFFile
+#include "dataset-to-gguf/gguf-writer.h"       // Включаем наш класс для записи GGUF
+#include "dataset-to-gguf/text-reader.h"
 
 // Структура для хранения параметров командной строки
 struct training_data_params {
@@ -31,6 +33,8 @@ struct training_data_params {
     std::string input_path    = "input.txt";                     // Путь к входному текстовому файлу
     std::string output_path   = "output.gguf";                   // Путь для сохранения GGUF файла
     int32_t     max_seq_len   = 2048;                            // Максимальная длина последовательности
+    bool        pre_tokenized = false;                           // Флаг: если true, входные данные уже токенизированы (токены в виде чисел)
+    std::string input_type    = "text";                          // Тип входных данных (например, "text", "parquet")
 };
 
 // Функция для парсинга аргументов командной строки
@@ -46,6 +50,10 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
             params.output_path = argv[++i];
         } else if (arg == "--max-seq-len" || arg == "-l") {
             params.max_seq_len = std::stoi(argv[++i]);
+        } else if (arg == "--pre-tokenized" || arg == "-p") {
+            params.pre_tokenized = true; // Устанавливаем флаг, если входные данные уже токенизированы
+        } else if (arg == "--input-type" || arg == "-t") {
+            params.input_type = argv[++i]; // Указываем тип входных данных
         } else if (arg == "-h" || arg == "--help") {
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
@@ -54,6 +62,8 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
             printf("  -i, --input           path to input text file (default: %s)\n", params.input_path.c_str());
             printf("  -o, --output          path to output gguf file (default: %s)\n", params.output_path.c_str());
             printf("  -l, --max-seq-len     max sequence length (default: %d)\n", params.max_seq_len);
+            printf("  -p, --pre-tokenized   input file contains pre-tokenized data (space-separated token IDs)\n");
+            printf("  -t, --input-type      type of input data (e.g., 'text', 'parquet') (default: %s)\n", params.input_type.c_str());
             exit(0);
         } else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -71,10 +81,12 @@ int main(int argc, char **argv) {
     printf("  Model for tokenizer: %s\n", params.model_path.c_str());
     printf("  Input file: %s\n", params.input_path.c_str());
     printf("  Output file: %s\n", params.output_path.c_str());
-    printf("  Max sequence length: %d\n\n", params.max_seq_len);
+    printf("  Max sequence length: %d\n", params.max_seq_len);
+    printf("  Pre-tokenized input: %s\n", params.pre_tokenized ? "Yes" : "No");
+    printf("  Input type: %s\n\n", params.input_type.c_str());
 
     // Инициализация llama.cpp
-    llama_backend_init(true); // NUMA-aware init
+    llama_backend_init();
 
     // Загрузка модели для использования ее токенизатора
     llama_model_params model_params = llama_model_default_params();
@@ -85,120 +97,107 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // --- ПЕРВЫЙ ПРОХОД: Сбор длин последовательностей ---
-    printf("First pass: Reading input file and tokenizing to get sequence lengths...\n");
-    std::vector<uint32_t> sequence_lengths;
-    std::ifstream input_file(params.input_path);
-    if (!input_file.is_open()) {
-        fprintf(stderr, "error: failed to open input file %s\n", params.input_path.c_str());
+    // --- Создание DataReader на основе input_type ---
+    std::unique_ptr<DatasetReader> reader;
+    if (params.input_type == "text") {
+        reader = std::make_unique<TextDatasetReader>(model, params.max_seq_len, params.pre_tokenized);
+    } else {
+        fprintf(stderr, "error: Unsupported input type: %s\n", params.input_type.c_str());
         llama_model_free(model);
         llama_backend_free();
         return 1;
     }
 
-    std::string line;
-    std::vector<llama_token> tokens_buffer(params.max_seq_len);
-    while (std::getline(input_file, line)) {
-        if (line.empty()) {
-            continue;
-        }
-        int n_tokens = llama_tokenize(&model->vocab, line.c_str(), line.length(), tokens_buffer.data(), params.max_seq_len, false, true);
-        if (n_tokens < 0) {
-            fprintf(stderr, "error: tokenization failed for line: %s\n", line.c_str());
-            // Пропускаем строку, но не прерываем весь процесс
-            continue;
-        }
-        sequence_lengths.push_back(n_tokens);
+    // Открытие источника данных
+    if (!reader->open(params.input_path)) {
+        fprintf(stderr, "error: Failed to open data source %s\n", params.input_path.c_str());
+        llama_model_free(model);
+        llama_backend_free();
+        return 1;
     }
-    input_file.close();
+
+    // --- ПЕРВЫЙ ПРОХОД: Сбор длин последовательностей ---
+    printf("First pass: Reading input data and getting sequence lengths...\n");
+    std::vector<uint32_t> sequence_lengths; // Будет хранить длины последовательностей
+    std::vector<llama_token> tokens;
+
+    while (reader->read_next_sequence(tokens)) {
+        sequence_lengths.push_back(tokens.size());
+    }
     printf("First pass complete. Found %zu sequences.\n\n", sequence_lengths.size());
 
     // --- ЗАПИСЬ GGUF ФАЙЛА ---
     printf("Creating GGUF file...\n");
-    struct gguf_context * ctx = gguf_init_for_write(false);
-    if (!ctx) {
-        fprintf(stderr, "error: failed to initialize gguf context\n");
-        return 1;
-    }
-
-    // Запись метаданных
-    const uint64_t sequence_count = sequence_lengths.size();
-    const int vocab_size = llama_vocab_n_tokens(&model->vocab);
-
-    gguf_set_val_str(ctx, "training.format.version", "1.0");
-    gguf_set_val_str(ctx, "training.dataset.name", params.input_path.c_str());
-    time_t now = time(0);
-    char buf[sizeof "2011-10-08T07:07:09Z"];
-    strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
-    gguf_set_val_str(ctx, "training.file.creation_date", buf);
-
-    // Запись информации о токенизаторе
-    char model_name_buffer[128];
-    llama_model_meta_val_str(model, "general.architecture", model_name_buffer, sizeof(model_name_buffer));
-    gguf_set_val_str(ctx, "training.tokenizer.gguf.model", model_name_buffer);
-
-    // Запись словаря
-    std::vector<const char *> vocab_list;
-    for (int i = 0; i < vocab_size; ++i) {
-        vocab_list.push_back(llama_vocab_get_text(&model->vocab, i));
-    }
-    gguf_set_arr_str(ctx, "training.tokenizer.gguf.vocab", vocab_list.data(), vocab_size);
-
-    gguf_set_val_u64(ctx, "training.sequence.count", sequence_count);
-    gguf_set_arr_data(ctx, "training.sequence.lengths", GGUF_TYPE_UINT32, sequence_lengths.data(), sequence_count);
-    printf("Metadata written.\n");
-
-    // --- ВТОРОЙ ПРОХОД: Запись тензоров ---
-    printf("Second pass: Writing tensors to GGUF file...\n");
-    input_file.open(params.input_path); // Открываем файл заново
-    for (uint64_t i = 0; i < sequence_count; ++i) {
-        if (!std::getline(input_file, line)) {
-            fprintf(stderr, "error: file ended prematurely on second pass. Expected %zu sequences, got %llu.\n", sequence_lengths.size(), i);
-            break;
-        }
-        if (line.empty() && sequence_lengths[i] == 0) {
-            // Если пустая строка была обработана в первом проходе, пропускаем
-            continue;
-        }
-
-        int n_tokens = llama_tokenize(&model->vocab, line.c_str(), line.length(), tokens_buffer.data(), params.max_seq_len, false, true);
-        if (n_tokens != (int)sequence_lengths[i]) {
-            fprintf(stderr, "warning: tokenization mismatch on second pass for sequence %llu. Expected %u tokens, got %d.\n", i, sequence_lengths[i], n_tokens);
-            if (n_tokens < 0) continue;
-        }
-
-        char tensor_name[128];
-        snprintf(tensor_name, sizeof(tensor_name), "training.tensor.%llu", i);
-
-        gguf_add_tensor(ctx, ggml_new_tensor_1d(ggml_init({0, 0, 0, 0}), GGML_TYPE_I32, n_tokens));
-        gguf_set_tensor_name(ctx, tensor_name);
-        gguf_set_tensor_data(ctx, tensor_name, tokens_buffer.data(), n_tokens * sizeof(int32_t));
-    }
-    input_file.close();
-    printf("Second pass complete.\n\n");
-
-    // Сохранение файла на диск
-    printf("Writing GGUF data to %s...\n", params.output_path.c_str());
-    FILE * fout = fopen(params.output_path.c_str(), "wb");
-    if (!fout) {
-        fprintf(stderr, "error: failed to open output file %s\n", params.output_path.c_str());
-        gguf_free(ctx);
+    // Создаем экземпляр GGUFFile, который будет управлять GGUF контекстом
+    std::unique_ptr<GGUFFile> gguf_file;
+    try {
+        gguf_file = std::make_unique<GGUFFile>();
+    } catch (const std::runtime_error& e) {
+        fprintf(stderr, "error: Failed to initialize GGUFFile: %s\n", e.what());
         llama_model_free(model);
         llama_backend_free();
         return 1;
     }
-    fwrite(gguf_get_meta_data(ctx), 1, gguf_get_meta_size(ctx), fout);
-    for (uint64_t i = 0; i < gguf_get_n_tensors(ctx); ++i) {
-        struct ggml_tensor * tensor = gguf_get_tensor_by_index(ctx, i);
-        fwrite(tensor->data, 1, ggml_nbytes(tensor), fout);
+
+    // Передаем указатель на gguf_file в GGUFWriter
+    GGUFWriter writer(gguf_file.get());
+
+    // Инициализируем метаданные GGUF файла
+    writer.init_metadata(model, params.input_path, sequence_lengths.size());
+    printf("Metadata written.\n");
+
+    // --- ВТОРОЙ ПРОХОД: Запись тензоров ---
+    printf("Second pass: Writing tensors to GGUF file...\n");
+    if (!reader->reset()) {
+        fprintf(stderr, "error: Failed to reset data reader for second pass.\n");
+        llama_model_free(model);
+        llama_backend_free();
+        return 1;
     }
-    fclose(fout);
+
+    uint64_t current_sequence_idx = 0;
+    while (reader->read_next_sequence(tokens)) {
+        if (current_sequence_idx >= sequence_lengths.size()) {
+            fprintf(stderr, "error: file ended prematurely on second pass. Expected %zu sequences, but reached end of file at %lu.\n", sequence_lengths.size(), current_sequence_idx);
+            break;
+        }
+
+        uint32_t expected_n_tokens = sequence_lengths[current_sequence_idx];
+        uint32_t actual_n_tokens = tokens.size();
+
+        if (actual_n_tokens != expected_n_tokens) {
+            fprintf(stderr, "warning: tokenization mismatch on second pass for sequence %lu. Expected %u tokens, got %u.\n", current_sequence_idx, expected_n_tokens, actual_n_tokens);
+            // Если количество токенов не совпадает, используем то, что получили на втором проходе
+            // Это может быть неидеально, но позволяет продолжить
+        }
+
+        // Добавляем тензор только если есть токены
+        if (actual_n_tokens > 0) {
+            writer.add_sequence_tensor(current_sequence_idx, tokens);
+        } else {
+            // Если ожидалось 0 токенов, но строка не была пустой, выводим предупреждение
+            if (expected_n_tokens != 0) {
+                fprintf(stderr, "warning: sequence %lu resulted in 0 tokens on second pass, but expected %u.\n", current_sequence_idx, expected_n_tokens);
+            }
+        }
+        current_sequence_idx++;
+    }
+    reader->close(); // Закрываем DataReader после использования
+    printf("Second pass complete.\n\n");
+
+    // Сохранение файла на диск
+    printf("Writing GGUF data to %s...\n", params.output_path.c_str());
+    if (!writer.write_to_file(params.output_path)) {
+        fprintf(stderr, "error: failed to write GGUF file %s\n", params.output_path.c_str());
+        llama_model_free(model);
+        llama_backend_free();
+        return 1;
+    }
 
     printf("Conversion successful!\n");
     printf("Output file: %s\n", params.output_path.c_str());
 
     // Очистка
-    gguf_free(ctx);
     llama_model_free(model);
     llama_backend_free();
 
