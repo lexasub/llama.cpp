@@ -26,6 +26,10 @@ public:
     // Проверяет, был ли GGUF контекст успешно инициализирован.
     bool is_initialized() const { return ctx != nullptr; }
 
+    // Получает указатель на внутренний gguf_context.
+    // Использовать с осторожностью, предпочтительнее использовать методы GGUFFile.
+    struct gguf_context* get_gguf_context() const { return ctx; }
+
     // --- Методы для работы с метаданными (KV-парами) ---
 
     // Устанавливает строковое значение для ключа.
@@ -65,10 +69,6 @@ public:
 
     // Получает количество тензоров в GGUF файле.
     int64_t get_n_tensors() const;
-
-    // Получает ggml_tensor по индексу.
-    // Возвращает nullptr, если индекс некорректен.
-    struct ggml_tensor* get_tensor_by_idx(int64_t idx) const;
 
     // --- Методы для сохранения/загрузки файла ---
 

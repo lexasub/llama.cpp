@@ -18,7 +18,14 @@ target_compile_features(${TARGET} PRIVATE cxx_std_11)
 
 
 set(TARGET convert-to-train-gguf)
-add_executable(${TARGET} convert-to-train-gguf.cpp dataset-to-gguf/gguf-writer.cpp dataset-to-gguf/gguf-file.cpp dataset-to-gguf/text-reader.cpp)
+add_executable(${TARGET}
+        convert-to-train-gguf.cpp
+        dataset-to-gguf/gguf-writer.cpp
+        dataset-to-gguf/gguf-file.cpp
+        dataset-to-gguf/text-reader.cpp
+        dataset-to-gguf/gguf-converter.cpp
+        dataset-to-gguf/gguf-reader.cpp
+)
 install(TARGETS ${TARGET} RUNTIME)
 
 

@@ -104,19 +104,6 @@ int64_t GGUFFile::get_n_tensors() const {
     return gguf_get_n_tensors(ctx);
 }
 
-// Получает ggml_tensor по индексу.
-struct ggml_tensor* GGUFFile::get_tensor_by_idx(int64_t idx) const {
-    if (!ctx || idx < 0 || idx >= gguf_get_n_tensors(ctx)) {
-        return nullptr;
-    }
-    // Внимание: gguf_get_tensor_by_idx возвращает ggml_tensor*,
-    // но его данные могут быть не загружены в память, если gguf_init_from_file
-    // был вызван с no_alloc = true (как в нашем случае для чтения).
-    // Для получения данных тензора из файла потребуется дополнительная логика
-    // чтения из файла по смещению gguf_get_tensor_offset.
-    return get_tensor_by_idx(idx);
-}
-
 // --- Методы для сохранения/загрузки файла ---
 
 // Записывает весь GGUF контекст в файл.
