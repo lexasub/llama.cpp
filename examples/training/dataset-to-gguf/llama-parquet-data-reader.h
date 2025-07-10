@@ -12,23 +12,22 @@
 #include <string>
 #include <vector>
 
-#include "dataset-reader.h"
+#include "llama-dataset-reader.h"
 
-// Implementation of DataReader for reading Parquet files.
+// Implementation of DatasetReader for reading Parquet files.
 // This class will handle reading tokenized sequences from a Parquet file.
-class ParquetDatasetReader : public DatasetReader {
-public:
+struct llama_parquet_dataset_reader : public llama_dataset_reader {
     // Constructor.
     // model: Pointer to the llama model for tokenization (can be nullptr if data is pre-tokenized).
     // max_seq_len: Maximum sequence length for truncation.
     // pre_tokenized: If true, input data is already tokenized (token IDs in a numeric column).
     // text_column_name: Name of the column containing raw text data.
     // tokens_column_name: Name of the column containing pre-tokenized data (list<int32>).
-    ParquetDatasetReader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized,
+    llama_parquet_dataset_reader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized,
                          const std::string& text_column_name, const std::string& tokens_column_name);
 
     // Destructor.
-    ~ParquetDatasetReader();
+    ~llama_parquet_dataset_reader();
 
     // Opens the Parquet file for reading.
     // path: Path to the Parquet file.
@@ -47,9 +46,9 @@ public:
     // Returns true if reset is successful, otherwise false.
     bool reset() override;
 
-    // Метод для получения общего количества последовательностей в датасете.
-    // Для Parquet-файлов это будет количество строк, полученное из метаданных.
-    uint64_t get_total_sequences() const override;
+    // Method to get the total number of sequences in the dataset.
+    // For Parquet files, this will be the number of rows obtained from metadata.
+    uint64_t total_sequences() const override;
 
 private:
     const struct llama_model* model_; // Llama model for tokenization (if needed)
@@ -59,19 +58,18 @@ private:
     std::shared_ptr<arrow::io::ReadableFile> input_file_; // Arrow file handle
     std::unique_ptr<parquet::arrow::FileReader> parquet_reader_; // Parquet reader
     std::shared_ptr<arrow::Table> current_table_; // Current table batch being processed
-    std::shared_ptr<arrow::ChunkedArray> chunked_array_; // Added: Member to store the chunked array
+    std::shared_ptr<arrow::ChunkedArray> chunked_array_; // Member to store the chunked array
 
     int current_row_group_index_;                 // Current row group index
     std::shared_ptr<parquet::arrow::RowGroupReader> current_row_group_reader_; // Reader for the current row group
 
     int64_t current_row_in_table_; // Current row index within the current_table_
     int current_column_index_;     // Index of the column containing text/tokens
-    std::string m_filePath;        // Path to the Parquet file
+    std::string m_file_path;        // Path to the Parquet file
 
     std::string text_column_name_;   // Configurable name for the text column
     std::string tokens_column_name_; // Configurable name for the tokens column
 
     // Private helper to get the next batch of data (now a row group)
-    bool get_next_batch();
+    bool llama_parquet_dataset_reader_get_next_batch();
 };
-

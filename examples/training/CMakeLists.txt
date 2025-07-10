@@ -10,12 +10,12 @@ if(LLAMA_PARQUET)
 endif()
 
 add_library(dataset-to-gguf-lib
-        dataset-to-gguf/gguf-writer.cpp
-        dataset-to-gguf/gguf-file.cpp
-        dataset-to-gguf/text-reader.cpp
-        dataset-to-gguf/gguf-converter.cpp
-        dataset-to-gguf/gguf-reader.cpp
-        dataset-to-gguf/parquet-reader.cpp
+        dataset-to-gguf/llama-gguf-writer.cpp
+        dataset-to-gguf/llama-gguf-file.cpp
+        dataset-to-gguf/llama-text-data-reader.cpp
+        dataset-to-gguf/llama-gguf-converter.cpp
+        dataset-to-gguf/llama-gguf-reader.cpp
+        dataset-to-gguf/llama-parquet-data-reader.cpp
 )
 
 # Link libraries for dataset-to-gguf-lib

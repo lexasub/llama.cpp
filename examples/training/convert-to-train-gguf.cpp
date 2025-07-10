@@ -1,52 +1,51 @@
-// Главная утилита для конвертации текстового датасета в формат GGUF для обучения моделей в llama.cpp.
+// Main utility for converting a text dataset to the GGUF format for training models in llama.cpp.
 //
-// Логика работы:
-// 1. Парсит аргументы командной строки.
-// 2. Загружает модель-токенизатор.
-// 3. Использует класс GGUFConverter для выполнения всего процесса конвертации:
-//    - Первый проход по входным данным для сбора метаданных (длины последовательностей).
-//    - Создание GGUF-файла и запись в него всех собранных метаданных.
-//    - Второй проход по входным данным для добавления каждой последовательности
-//      как отдельного тензора в GGUF-файл.
-// 4. После успешной конвертации, использует GGUFReader для чтения и вывода
-//    некоторой метаинформации и первой записи из созданного GGUF файла.
+// Logic:
+// 1. Parses command line arguments.
+// 2. Loads the tokenizer model.
+// 3. Uses the llama_gguf_converter class to perform the entire conversion process:
+//    - First pass over the input data to collect metadata (sequence lengths).
+//    - Creation of the GGUF file and writing all collected metadata to it.
+//    - Second pass over the input data to add each sequence as a separate tensor to the GGUF file.
+// 4. After successful conversion, uses llama_gguf_reader to read and print
+//    some meta-information and the first record from the created GGUF file.
 //
-// Такой двухпроходный подход позволяет обрабатывать датасеты, значительно превышающие
-// объем доступной оперативной памяти.
+// This two-pass approach allows processing datasets significantly larger than
+// available RAM.
 
-#include <algorithm>  // Для std::min
-#include <array>      // Для std::array
-#include <cinttypes>
+#include <algorithm>  // For std::min
+#include <array>      // For std::array
+#include <cinttypes>  // For PRIu64
 #include <iostream>
-#include <limits>  // Для std::numeric_limits
-#include <memory>  // Для std::unique_ptr
+#include <limits>     // For std::numeric_limits
+#include <memory>     // For std::unique_ptr
 #include <string>
 #include <vector>
 
-#include "dataset-to-gguf/gguf-converter.h"       // Включаем наш новый класс GGUFConverter
-#include "dataset-to-gguf/gguf-reader.h"          // Включаем наш новый класс GGUFReader
-#include "llama.h"  // Для llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
+#include "dataset-to-gguf/llama-gguf-converter.h"  // Include our new llama_gguf_converter class
+#include "dataset-to-gguf/llama-gguf-reader.h"
+#include "llama.h"  // For llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
 
-// Структура для хранения параметров командной строки
-struct training_data_params {
-    std::string model_path    = "models/7B/ggml-model-f16.gguf"; // Путь к модели для токенизатора
-    std::string input_path    = "input.txt";                     // Путь к входному текстовому файлу
-    std::string output_path   = "output.gguf";                   // Путь для сохранения GGUF файла
-    int32_t     max_seq_len   = 2048;                            // Максимальная длина последовательности
-    bool        pre_tokenized = false;                           // Флаг: если true, входные данные уже токенизированы (токены в виде чисел)
-    std::string input_type    = "text";                          // Тип входных данных (например, "text", "parquet")
-    bool        do_preview    = false;                           // Флаг: если true, выполнить предварительный просмотр
-    int32_t     preview_count = 1;                               // Количество последовательностей для предварительного просмотра
-    bool        detokenize_preview = false;                      // Флаг: если true, детокенизировать предварительный просмотр
-    std::string parquet_text_column = "text";                    // Имя столбца с текстом в Parquet файле
-    std::string parquet_tokens_column = "tokens";                // Имя столбца с токенами в Parquet файле
+// Structure for storing command line parameters
+struct llama_training_data_params {
+    std::string model_path          = "models/7B/ggml-model-f16.gguf"; // Path to the model for the tokenizer
+    std::string input_path          = "input.txt";                     // Path to the input text file
+    std::string output_path         = "output.gguf";                   // Path to save the GGUF file
+    int32_t     max_seq_len         = 2048;                            // Maximum sequence length
+    bool        pre_tokenized       = false;                           // Flag: if true, input data is already tokenized (token IDs as numbers)
+    std::string input_type          = "text";                          // Type of input data (e.g., "text", "parquet")
+    bool        do_preview          = false;                           // Flag: if true, perform a preview
+    int32_t     preview_count       = 1;                               // Number of sequences for preview
+    bool        detokenize_preview  = false;                           // Flag: if true, detokenize preview
+    std::string parquet_text_column = "text";                          // Column name for raw text in Parquet files
+    std::string parquet_tokens_column = "tokens";                      // Column name for pre-tokenized data (list<int32>) in Parquet files
 };
 
-// Предварительная декларация функции парсинга параметров
-void training_data_params_parse(int argc, char **argv, training_data_params &params);
+// Forward declaration of the parameter parsing function
+void llama_training_data_params_parse(int argc, char ** argv, llama_training_data_params & params);
 
-// Функция для парсинга аргументов командной строки
-void training_data_params_parse(int argc, char **argv, training_data_params &params) {
+// Function for parsing command line arguments
+void llama_training_data_params_parse(int argc, char ** argv, llama_training_data_params & params) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -63,17 +62,17 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
         } else if (arg == "--input-type" || arg == "-t") {
             params.input_type = argv[++i];
         } else if (arg == "--preview") {
-            params.do_preview = true; // Включаем предварительный просмотр
+            params.do_preview = true; // Enable preview
         } else if (arg == "--preview-count") {
             params.preview_count = std::stoi(argv[++i]);
             if (params.preview_count <= 0) {
                 fprintf(stderr, "error: --preview-count must be a positive integer.\n");
                 exit(1);
             }
-            params.do_preview = true; // Включаем предварительный просмотр, если указан count
+            params.do_preview = true; // Enable preview if count is specified
         } else if (arg == "--detokenize-preview") {
             params.detokenize_preview = true;
-            params.do_preview = true; // Включаем предварительный просмотр, если указана детокенизация
+            params.do_preview = true; // Enable preview if detokenization is specified
         } else if (arg == "--parquet-text-column") {
             params.parquet_text_column = argv[++i];
         } else if (arg == "--parquet-tokens-column") {
@@ -101,11 +100,11 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
     }
 }
 
-int main(int argc, char **argv) {
-    training_data_params params_raw;
-    training_data_params_parse(argc, argv, params_raw);
+int main(int argc, char ** argv) {
+    llama_training_data_params params_raw;
+    llama_training_data_params_parse(argc, argv, params_raw);
 
-    // Выводим параметры для проверки
+    // Print parameters for verification
     printf("Parameters:\n");
     printf("  Model for tokenizer: %s\n", params_raw.model_path.c_str());
     printf("  Input file: %s\n", params_raw.input_path.c_str());
@@ -124,10 +123,10 @@ int main(int argc, char **argv) {
     }
     printf("\n");
 
-    // Инициализация llama.cpp
+    // Initialize llama.cpp
     llama_backend_init();
 
-    // Загрузка модели для использования ее токенизатора
+    // Load the model for its tokenizer
     llama_model_params model_params = llama_model_default_params();
     llama_model * model = llama_model_load_from_file(params_raw.model_path.c_str(), model_params);
 
@@ -137,47 +136,47 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // --- Диагностический тест: Чтение файла модели токенизатора с помощью GGUFReader ---
+    // --- Diagnostic Test: Reading tokenizer model GGUF file ---
     printf("--- Diagnostic Test: Reading tokenizer model GGUF file ---\n");
     try {
-        GGUFReader tokenizer_model_reader(params_raw.model_path);
-        if (tokenizer_model_reader.is_initialized()) {
+        llama_gguf_reader tokenizer_model_reader(params_raw.model_path);
+        if (tokenizer_model_reader.llama_gguf_reader_is_initialized()) {
             printf("  Tokenizer Model GGUF file opened successfully.\n");
-            printf("  Tokenizer Model Name: %s\n", tokenizer_model_reader.get_metadata_str("general.name", "N/A").c_str());
-            printf("  Tokenizer Model Architecture: %s\n", tokenizer_model_reader.get_metadata_str("general.architecture", "N/A").c_str());
-            printf("  Tokenizer Model Tensor Count: %ld\n", tokenizer_model_reader.get_tensor_count());
+            printf("  Tokenizer Model Name: %s\n", tokenizer_model_reader.llama_gguf_reader_get_metadata_str("general.name", "N/A").c_str());
+            printf("  Tokenizer Model Architecture: %s\n", tokenizer_model_reader.llama_gguf_reader_get_metadata_str("general.architecture", "N/A").c_str());
+            printf("  Tokenizer Model Tensor Count: %ld\n", tokenizer_model_reader.llama_gguf_reader_get_tensor_count());
             printf("  Diagnostic Test: Tokenizer Model GGUF read successful.\n");
         } else {
             fprintf(stderr, "error: Diagnostic Test: Tokenizer Model GGUF read failed to initialize.\n");
-            llama_model_free(model); // Освобождаем модель перед выходом
+            llama_model_free(model); // Free model before exiting
             llama_backend_free();
             return 1;
         }
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error & e) {
         fprintf(stderr, "error: Diagnostic Test: Tokenizer Model GGUF read failed: %s\n", e.what());
-        llama_model_free(model); // Освобождаем модель перед выходом
+        llama_model_free(model); // Free model before exiting
         llama_backend_free();
         return 1;
     }
     printf("--- End of Diagnostic Test ---\n\n");
 
 
-    // Подготовка параметров для GGUFConverter
-    ConvertParams convert_params;
+    // Prepare parameters for llama_gguf_converter
+    llama_convert_params convert_params;
     convert_params.input_path = params_raw.input_path;
     convert_params.output_path = params_raw.output_path;
     convert_params.max_seq_len = params_raw.max_seq_len;
     convert_params.pre_tokenized = params_raw.pre_tokenized;
     convert_params.input_type = params_raw.input_type;
-    convert_params.model = model; // Передаем указатель на загруженную модель
-    convert_params.parquet_text_column = params_raw.parquet_text_column; // Передаем имя текстового столбца Parquet
-    convert_params.parquet_tokens_column = params_raw.parquet_tokens_column; // Передаем имя столбца токенов Parquet
+    convert_params.model = model; // Pass pointer to the loaded model
+    convert_params.parquet_text_column = params_raw.parquet_text_column; // Pass Parquet text column name
+    convert_params.parquet_tokens_column = params_raw.parquet_tokens_column; // Pass Parquet tokens column name
 
-    // Создаем и запускаем конвертер
-    GGUFConverter converter;
-    bool success = converter.convert(convert_params);
+    // Create and run the converter
+    llama_gguf_converter converter;
+    bool success = converter.llama_gguf_converter_convert(convert_params);
 
-    // Очистка модели llama
+    // Clean up llama model
     llama_model_free(model);
     llama_backend_free();
 
@@ -189,31 +188,31 @@ int main(int argc, char **argv) {
     printf("Conversion successful!\n");
     printf("Output file: %s\n", params_raw.output_path.c_str());
 
-    // --- Предварительный просмотр созданного GGUF файла (если запрошено) ---
+    // --- Preview generated GGUF file (if requested) ---
     if (params_raw.do_preview) {
         printf("\n--- Previewing generated GGUF file ---\n");
         try {
-            GGUFReader reader(params_raw.output_path);
+            llama_gguf_reader reader(params_raw.output_path);
 
-            if (!reader.is_initialized()) {
-                fprintf(stderr, "error: GGUFReader failed to initialize for preview.\n");
+            if (!reader.llama_gguf_reader_is_initialized()) {
+                fprintf(stderr, "error: llama_gguf_reader failed to initialize for preview.\n");
                 return 1;
             }
 
-            printf("  Dataset Name: %s\n", reader.get_metadata_str("training.dataset.name", "N/A").c_str());
-            printf("  Sequence Count: %lu\n", reader.get_metadata_u64("training.sequence.count", 0));
-            printf("  Tokenizer Model: %s\n", reader.get_metadata_str("training.tokenizer.gguf.model", "N/A").c_str());
+            printf("  Dataset Name: %s\n", reader.llama_gguf_reader_get_metadata_str("training.dataset.name", "N/A").c_str());
+            printf("  Sequence Count: %lu\n", reader.llama_gguf_reader_get_metadata_u64("training.sequence.count", 0));
+            printf("  Tokenizer Model: %s\n", reader.llama_gguf_reader_get_metadata_str("training.tokenizer.gguf.model", "N/A").c_str());
 
-            int64_t tensor_count = reader.get_tensor_count();
+            int64_t tensor_count = reader.llama_gguf_reader_get_tensor_count();
             if (tensor_count > 0) {
-                // Выводим N первых последовательностей
+                // Print N first sequences
                 for (int64_t i = 0; i < std::min((int64_t)params_raw.preview_count, tensor_count); ++i) {
                     printf("  Sequence (training.tensor.%" PRId64 "):\n", i);
                     std::vector<llama_token> sequence_tokens;
-                    if (reader.read_tensor_data(i, sequence_tokens)) {
+                    if (reader.llama_gguf_reader_read_tensor_data(i, sequence_tokens)) {
                         printf("    Length: %zu tokens\n", sequence_tokens.size());
                         printf("    Tokens: [");
-                        for (size_t j = 0; j < std::min((size_t)10, sequence_tokens.size()); ++j) { // Выводим до 10 токенов
+                        for (size_t j = 0; j < std::min((size_t)10, sequence_tokens.size()); ++j) { // Print up to 10 tokens
                             printf("%d%s", sequence_tokens[j], (j == std::min((size_t)10, sequence_tokens.size()) - 1) ? "" : ", ");
                         }
                         if (sequence_tokens.size() > 10) {
@@ -222,10 +221,10 @@ int main(int argc, char **argv) {
                         printf("]\n");
 
                         if (params_raw.detokenize_preview) {
-                            // Детокенизация
+                            // Detokenization
                             std::string detokenized_text = "";
-                            // Буфер для одного токена
-                            std::array<char, 256> piece_buf; // Достаточно большой буфер для одного токена
+                            // Buffer for a single token
+                            std::array<char, 256> piece_buf; // Large enough buffer for a single token
                             for (llama_token token : sequence_tokens) {
                                 int n_chars = llama_token_to_piece(llama_model_get_vocab(model), token, piece_buf.data(), piece_buf.size(), 1, false);
                                 if (n_chars > 0) {
@@ -243,7 +242,7 @@ int main(int argc, char **argv) {
                 printf("  No sequences found in the GGUF file.\n");
             }
 
-        } catch (const std::runtime_error& e) {
+        } catch (const std::runtime_error & e) {
             fprintf(stderr, "error: GGUF preview failed: %s\n", e.what());
             return 1;
         }

@@ -1,10 +1,10 @@
-#include "parquet-reader.h"
+#include "llama-parquet-data-reader.h" // Include the new header name
 
-#include <algorithm>  // For std::min
-#include <iostream>
+#include <algorithm> // For std::min
+#include <iostream>  // For std::cerr
 
 // Constructor
-ParquetDatasetReader::ParquetDatasetReader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized,
+llama_parquet_dataset_reader::llama_parquet_dataset_reader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized,
                                            const std::string& text_column_name, const std::string& tokens_column_name)
     : model_(model),
       max_seq_len_(max_seq_len),
@@ -17,23 +17,23 @@ ParquetDatasetReader::ParquetDatasetReader(const struct llama_model* model, int3
 }
 
 // Destructor
-ParquetDatasetReader::~ParquetDatasetReader() {
+llama_parquet_dataset_reader::~llama_parquet_dataset_reader() {
     close();
-    m_filePath.clear(); // Clear the stored path only on destruction
+    m_file_path.clear(); // Clear the stored path only on destruction
 }
 
 // Opens the Parquet file for reading.
-bool ParquetDatasetReader::open(const std::string& path) {
+bool llama_parquet_dataset_reader::open(const std::string& path) {
     // Close any previously open file
-    // Note: m_filePath is NOT cleared here, it's preserved for reset()
+    // Note: m_file_path is NOT cleared here, it's preserved for reset()
     close();
 
-    m_filePath = path; // Store the file path for reset()
+    m_file_path = path; // Store the file path for reset()
 
     // Open the Parquet file
     arrow::Status status = arrow::io::ReadableFile::Open(path).Value(&input_file_);
     if (!status.ok()) {
-        std::cerr << "Error (ParquetDatasetReader::open): Failed to open Parquet file '" << path << "': " << status.ToString() << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::open): Failed to open Parquet file '" << path << "': " << status.ToString() << std::endl;
         return false;
     }
 
@@ -42,7 +42,7 @@ bool ParquetDatasetReader::open(const std::string& path) {
         parquet::arrow::OpenFile(input_file_, arrow::default_memory_pool());
 
     if (!reader_raw.ok()) {
-        std::cerr << "Error (ParquetDatasetReader::open): Failed to create Parquet file reader for '" << path << "': " << reader_raw.status().ToString() << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::open): Failed to create Parquet file reader for '" << path << "': " << reader_raw.status().ToString() << std::endl;
         close();
         return false;
     }
@@ -53,7 +53,7 @@ bool ParquetDatasetReader::open(const std::string& path) {
     std::shared_ptr<arrow::Schema> schema;
     status = parquet_reader_->GetSchema(&schema); // Corrected: Use GetSchema and pass by address
     if (!status.ok() || schema == nullptr) {
-        std::cerr << "Error (ParquetDatasetReader::open): Failed to get schema from Parquet file: " << status.ToString() << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::open): Failed to get schema from Parquet file: " << status.ToString() << std::endl;
         close();
         return false;
     }
@@ -62,19 +62,19 @@ bool ParquetDatasetReader::open(const std::string& path) {
     if (pre_tokenized_) {
         current_column_index_ = schema->GetFieldIndex(tokens_column_name_); // Use configurable name
         if (current_column_index_ == -1) {
-            std::cerr << "Error (ParquetDatasetReader::open): Pre-tokenized mode selected, but column '" << tokens_column_name_ << "' not found in Parquet schema." << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::open): Pre-tokenized mode selected, but column '" << tokens_column_name_ << "' not found in Parquet schema." << std::endl;
             close();
             return false;
         }
         // Validate column type: should be List<Int32>
         if (schema->field(current_column_index_)->type()->id() != arrow::Type::LIST) {
-            std::cerr << "Error (ParquetDatasetReader::open): Column '" << tokens_column_name_ << "' is not of LIST type as expected for pre-tokenized data. Actual type: " << schema->field(current_column_index_)->type()->ToString() << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::open): Column '" << tokens_column_name_ << "' is not of LIST type as expected for pre-tokenized data. Actual type: " << schema->field(current_column_index_)->type()->ToString() << std::endl;
             close();
             return false;
         }
         auto list_type = std::static_pointer_cast<arrow::ListType>(schema->field(current_column_index_)->type());
         if (list_type->value_type()->id() != arrow::Type::INT32) {
-            std::cerr << "Error (ParquetDatasetReader::open): List items in column '" << tokens_column_name_ << "' are not of INT32 type as expected. Actual value type: " << list_type->value_type()->ToString() << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::open): List items in column '" << tokens_column_name_ << "' are not of INT32 type as expected. Actual value type: " << list_type->value_type()->ToString() << std::endl;
             close();
             return false;
         }
@@ -82,13 +82,13 @@ bool ParquetDatasetReader::open(const std::string& path) {
     } else {
         current_column_index_ = schema->GetFieldIndex(text_column_name_); // Use configurable name
         if (current_column_index_ == -1) {
-            std::cerr << "Error (ParquetDatasetReader::open): Raw text mode selected, but column '" << text_column_name_ << "' not found in Parquet schema." << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::open): Raw text mode selected, but column '" << text_column_name_ << "' not found in Parquet schema." << std::endl;
             close();
             return false;
         }
         // Validate column type: should be String
         if (schema->field(current_column_index_)->type()->id() != arrow::Type::STRING) {
-            std::cerr << "Error (ParquetDatasetReader::open): Column '" << text_column_name_ << "' is not of STRING type as expected for raw text. Actual type: " << schema->field(current_column_index_)->type()->ToString() << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::open): Column '" << text_column_name_ << "' is not of STRING type as expected for raw text. Actual type: " << schema->field(current_column_index_)->type()->ToString() << std::endl;
             close();
             return false;
         }
@@ -97,16 +97,16 @@ bool ParquetDatasetReader::open(const std::string& path) {
     // Initialize row group index
     current_row_group_index_ = 0;
     // Read the first batch (row group)
-    return get_next_batch();
+    return llama_parquet_dataset_reader_get_next_batch();
 }
 
 // Reads the next sequence of tokens from the Parquet file.
-bool ParquetDatasetReader::read_next_sequence(std::vector<llama_token>& tokens) {
+bool llama_parquet_dataset_reader::read_next_sequence(std::vector<llama_token>& tokens) {
     tokens.clear();
 
     // If current_table_ is null or we've processed all rows in the current batch, get the next batch (row group)
     if (!current_table_ || current_row_in_table_ >= current_table_->num_rows()) {
-        if (!get_next_batch()) {
+        if (!llama_parquet_dataset_reader_get_next_batch()) {
             return false; // No more batches/row groups or error getting next batch
         }
     }
@@ -142,7 +142,7 @@ bool ParquetDatasetReader::read_next_sequence(std::vector<llama_token>& tokens) 
     } else {
         // Raw text data: read String array and tokenize
         if (!model_) {
-            std::cerr << "Error (ParquetDatasetReader::read_next_sequence): Llama model not provided for tokenization of raw text." << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::read_next_sequence): Llama model not provided for tokenization of raw text." << std::endl;
             return false;
         }
 
@@ -158,7 +158,7 @@ bool ParquetDatasetReader::read_next_sequence(std::vector<llama_token>& tokens) 
 
         int n_tokens = llama_tokenize(llama_model_get_vocab(model_), text.c_str(), text.length(), tokens_buffer.data(), max_seq_len_, false, true);
         if (n_tokens < 0) {
-            std::cerr << "Error (ParquetDatasetReader::read_next_sequence): Tokenization failed for text: '" << text << "'" << std::endl;
+            std::cerr << "Error (llama_parquet_dataset_reader::read_next_sequence): Tokenization failed for text: '" << text << "'" << std::endl;
             current_row_in_table_++;
             return true; // Return true with empty tokens to continue processing
         }
@@ -170,7 +170,7 @@ bool ParquetDatasetReader::read_next_sequence(std::vector<llama_token>& tokens) 
 }
 
 // Closes the Parquet file.
-void ParquetDatasetReader::close() {
+void llama_parquet_dataset_reader::close() {
     parquet_reader_.reset();
     current_row_group_reader_.reset(); // Reset row group reader
     current_table_.reset();
@@ -178,34 +178,34 @@ void ParquetDatasetReader::close() {
     if (input_file_) {
         arrow::Status status = input_file_->Close();
         if (!status.ok()) {
-            std::cerr << "Warning (ParquetDatasetReader::close): Failed to close Arrow file: " << status.ToString() << std::endl;
+            std::cerr << "Warning (llama_parquet_dataset_reader::close): Failed to close Arrow file: " << status.ToString() << std::endl;
         }
     }
     input_file_.reset();
     current_row_group_index_ = 0; // Reset row group index
     current_row_in_table_ = 0;
     current_column_index_ = -1;
-    // m_filePath is NOT cleared here. It's preserved for reset()
+    // m_file_path is NOT cleared here. It's preserved for reset()
 }
 
 // Resets the reader to the beginning of the Parquet file.
-bool ParquetDatasetReader::reset() {
-    if (m_filePath.empty()) { // Check if path is stored
-        std::cerr << "Error (ParquetDatasetReader::reset): Cannot reset, file path was not stored." << std::endl;
+bool llama_parquet_dataset_reader::reset() {
+    if (m_file_path.empty()) { // Check if path is stored
+        std::cerr << "Error (llama_parquet_dataset_reader::reset): Cannot reset, file path was not stored." << std::endl;
         return false;
     }
     // Re-open the file and re-initialize the reader
-    return open(m_filePath); // Use the stored path
+    return open(m_file_path); // Use the stored path
 }
 
 // Private helper to get the next batch of data (now a row group)
-bool ParquetDatasetReader::get_next_batch() {
+bool llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch() {
     current_table_.reset(); // Clear previous table
     current_row_in_table_ = 0; // Reset row index for new table
     chunked_array_.reset(); // Reset chunked array for new batch
 
     if (!parquet_reader_) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Parquet reader is not initialized." << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Parquet reader is not initialized." << std::endl;
         return false;
     }
 
@@ -216,7 +216,7 @@ bool ParquetDatasetReader::get_next_batch() {
     // Get the reader for the current row group
     current_row_group_reader_ = parquet_reader_->RowGroup(current_row_group_index_);
     if (!current_row_group_reader_) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Failed to get row group reader for index " << current_row_group_index_ << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Failed to get row group reader for index " << current_row_group_index_ << std::endl;
         return false;
     }
 
@@ -224,7 +224,7 @@ bool ParquetDatasetReader::get_next_batch() {
     std::shared_ptr<parquet::arrow::ColumnChunkReader> column_chunk_reader =
         current_row_group_reader_->Column(current_column_index_);
     if (!column_chunk_reader) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Failed to get column chunk reader for column " << current_column_index_
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Failed to get column chunk reader for column " << current_column_index_
                   << " in row group " << current_row_group_index_ << std::endl;
         return false;
     }
@@ -232,7 +232,7 @@ bool ParquetDatasetReader::get_next_batch() {
     // Read the column data into a ChunkedArray
     arrow::Status status = column_chunk_reader->Read(&chunked_array_); // Use member variable
     if (!status.ok()) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Failed to read column " << current_column_index_
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Failed to read column " << current_column_index_
                   << " from row group " << current_row_group_index_ << ": " << status.ToString() << std::endl;
         return false;
     }
@@ -241,14 +241,14 @@ bool ParquetDatasetReader::get_next_batch() {
     std::shared_ptr<arrow::Schema> schema;
     status = parquet_reader_->GetSchema(&schema);
     if (!status.ok() || schema == nullptr) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Failed to get schema from Parquet reader for column " << current_column_index_ << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Failed to get schema from Parquet reader for column " << current_column_index_ << std::endl;
         return false;
     }
 
     // Get the field for the current column index
     std::shared_ptr<arrow::Field> column_field = schema->field(current_column_index_);
     if (column_field == nullptr) {
-        std::cerr << "Error (ParquetDatasetReader::get_next_batch): Column field is null for index " << current_column_index_ << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::llama_parquet_dataset_reader_get_next_batch): Column field is null for index " << current_column_index_ << std::endl;
         return false;
     }
 
@@ -265,11 +265,11 @@ bool ParquetDatasetReader::get_next_batch() {
     return true;
 }
 
-// Метод для получения общего количества последовательностей в датасете.
-// Для Parquet-файлов это будет количество строк, полученное из метаданных.
-uint64_t ParquetDatasetReader::get_total_sequences() const {
+// Method to get the total number of sequences in the dataset.
+// For Parquet files, this will be the number of rows obtained from metadata.
+uint64_t llama_parquet_dataset_reader::total_sequences() const {
     if (!parquet_reader_) {
-        std::cerr << "Error (ParquetDatasetReader::get_total_sequences): Parquet reader is not initialized." << std::endl;
+        std::cerr << "Error (llama_parquet_dataset_reader::total_sequences): Parquet reader is not initialized." << std::endl;
         return 0;
     }
     // Total number of rows in the Parquet file
