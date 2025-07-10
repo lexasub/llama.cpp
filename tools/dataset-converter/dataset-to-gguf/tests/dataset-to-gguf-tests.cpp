@@ -7,10 +7,11 @@
 #include <string>
 #include <vector>
 
+#include "../llama-dataset-reader/llama-text-data-reader.h"
+#include "common.h"
 #include "dataset-to-gguf/llama-gguf-converter.h"
 #include "dataset-to-gguf/llama-gguf-reader.h"
 #include "dataset-to-gguf/llama-gguf-writer.h"
-#include "dataset-to-gguf/llama-text-data-reader.h"
 #include "llama.h"  // For llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
 
 namespace fs = std::filesystem;
@@ -391,18 +392,17 @@ bool Testllama_gguf_converter_ConvertTextFileSuccess() {
 
     llama_gguf_converterTestFixture fixture(g_llama_model);
 
-    llama_convert_params params;
-    params.model = fixture.model_for_converter_test;
-    params.input_path = fixture.input_text_file;
-    params.output_path = fixture.output_gguf_file;
+    common_params params;
+    params.in_files.push_back(fixture.input_text_file);
+    params.out_file = fixture.output_gguf_file;
     params.max_seq_len = 128;
     params.pre_tokenized = false;
-    params.input_type = "text";
+    params.dataset_format = "text";
     params.parquet_text_column = "text"; // Not used for text, but for completeness
     params.parquet_tokens_column = "tokens"; // Not used for text, but for completeness
 
     llama_gguf_converter converter;
-    TEST_ASSERT(converter.llama_gguf_converter_convert(params), "GGUF conversion failed");
+    TEST_ASSERT(converter.llama_gguf_converter_convert(params, g_llama_model), "GGUF conversion failed");
 
     // Verify file was created
     TEST_ASSERT(fs::exists(fixture.output_gguf_file), "Output GGUF file was not created");

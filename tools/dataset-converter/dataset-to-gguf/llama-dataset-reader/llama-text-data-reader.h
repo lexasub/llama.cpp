@@ -1,12 +1,11 @@
 #pragma once
 
-#include "llama-dataset-reader.h" // Include the base DatasetReader
-#include "llama.h"                // For llama_token and llama_model
+#include <fstream>  // For std::ifstream
+#include <string>   // For std::string
+#include <vector>   // For std::vector
 
-#include <fstream> // For std::ifstream
-#include <string>  // For std::string
-#include <vector>  // For std::vector
-#include <sstream> // For std::istringstream
+#include "llama-dataset-reader.h"
+#include "llama.h"  // For llama_token and llama_model
 
 // Implementation of DatasetReader for reading text files.
 // Supports both raw text and pre-tokenized data.

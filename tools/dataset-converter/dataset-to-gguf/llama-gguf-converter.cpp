@@ -13,34 +13,36 @@
 
 #include <cinttypes>  // For PRIu64
 #include <cstdio>     // For fprintf, snprintf
-#include <iostream>   // For std::cerr
 #include <memory>     // For std::unique_ptr
 #include <stdexcept>  // For std::runtime_error
 #include <vector>     // For std::vector
 
 // Include the refactored GGUF and data reader headers
+#include "common.h"
+#include "llama-dataset-reader/llama-dataset-reader.h"
+#include "llama-dataset-reader/llama-parquet-data-reader.h"
+#include "llama-dataset-reader/llama-text-data-reader.h"
 #include "llama-gguf-file.h"
 #include "llama-gguf-writer.h"
-#include "llama-dataset-reader.h"
-#include "llama-text-data-reader.h"
-#include "llama-parquet-data-reader.h" // Assuming this will be refactored next
 
 // Method to execute the conversion process.
-bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_convert_params& params) {
+bool llama_gguf_converter::llama_gguf_converter_convert(const struct common_params& params, const struct llama_model * model) {
     // --- Create DataReader based on input_type ---
     std::unique_ptr<llama_dataset_reader> reader;
-    if (params.input_type == "text") {
-        reader = std::make_unique<llama_text_dataset_reader>(params.model, params.max_seq_len, params.pre_tokenized);
-    } else if (params.input_type == "parquet") {
-        reader = std::make_unique<llama_parquet_dataset_reader>(params.model, params.max_seq_len, params.pre_tokenized, params.parquet_text_column, params.parquet_tokens_column);
+    if (params.dataset_format == "text") {
+        reader = std::make_unique<llama_text_dataset_reader>(model, params.max_seq_len, params.pre_tokenized);
+#ifdef LLAMA_PARQUET
+    } else if (params.dataset_format == "parquet") {
+        reader = std::make_unique<llama_parquet_dataset_reader>(model, params.max_seq_len, params.pre_tokenized, params.parquet_text_column, params.parquet_tokens_column);
+#endif
     } else {
-        fprintf(stderr, "error: Unsupported input type: %s\n", params.input_type.c_str());
+        fprintf(stderr, "error: Unsupported input type: %s\n", params.dataset_format.c_str());
         return false;
     }
 
     // Open the data source
-    if (!reader->open(params.input_path)) {
-        fprintf(stderr, "error: Failed to open data source %s\n", params.input_path.c_str());
+    if (!reader->open(params.in_files[0])) { //now only first file
+        fprintf(stderr, "error: Failed to open data source %s\n", params.in_files[0].c_str());
         return false;
     }
 
@@ -50,7 +52,7 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
     // --- FIRST PASS: Collect sequence lengths or get total count ---
     printf("First pass: Reading input data and getting sequence lengths...\n");
 
-    if (params.input_type == "parquet") {
+    if (params.dataset_format == "parquet") {
         // For Parquet, get total sequence count from metadata
         total_sequence_count = reader->total_sequences();
         printf("First pass complete. Found %" PRIu64 " sequences (from Parquet metadata).\n\n", total_sequence_count);
@@ -80,7 +82,7 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
     llama_gguf_writer writer(gguf_file.get());
 
     // Initialize GGUF file metadata
-    writer.llama_gguf_writer_init_metadata(params.model, params.input_path, total_sequence_count);
+    writer.llama_gguf_writer_init_metadata(model, params.in_files[0], total_sequence_count);
     printf("Metadata written.\n");
 
     // --- SECOND PASS: Write tensors ---
@@ -99,7 +101,7 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
         }
 
         uint32_t expected_n_tokens;
-        if (params.input_type == "text") {
+        if (params.dataset_format == "text") {
             // For text files, use lengths collected in the first pass
             expected_n_tokens = sequence_lengths[current_sequence_idx];
         } else {
@@ -114,7 +116,7 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
         // If the number of tokens does not match (only for text where we know it beforehand),
         // this is a critical error, as metadata collected in the first pass will be incorrect for this tensor.
         // Abort conversion to avoid creating a corrupted GGUF file.
-        if (params.input_type == "text" && actual_n_tokens != expected_n_tokens) {
+        if (params.dataset_format == "text" && actual_n_tokens != expected_n_tokens) {
             fprintf(stderr, "error: Tokenization mismatch on second pass for sequence %" PRIu64 ". Expected %u tokens, got %u.\n", current_sequence_idx, expected_n_tokens, actual_n_tokens);
             fprintf(stderr, "This indicates a non-deterministic tokenizer or an issue with input reading. Aborting conversion.\n");
             return false; // Abort conversion
@@ -127,7 +129,7 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
             // If 0 tokens were expected, but the line was not empty, print a warning
             // (This condition `expected_n_tokens != 0` is only relevant for text files,
             // where we might have gotten 0 tokens in the first pass for a non-empty line.)
-            if (params.input_type == "text" && expected_n_tokens != 0) {
+            if (params.dataset_format == "text" && expected_n_tokens != 0) {
                 fprintf(stderr, "warning: sequence %" PRIu64 " resulted in 0 tokens on second pass, but expected %u.\n", current_sequence_idx, expected_n_tokens);
                 // Continue, as this might be acceptable for some datasets,
                 // but warn about potential inconsistency.
@@ -139,14 +141,14 @@ bool llama_gguf_converter::llama_gguf_converter_convert(const struct llama_conve
     printf("Second pass complete.\n\n");
 
     // Save file to disk
-    printf("Writing GGUF data to %s...\n", params.output_path.c_str());
-    if (!writer.llama_gguf_writer_write_to_file(params.output_path)) {
-        fprintf(stderr, "error: Failed to write GGUF file %s\n", params.output_path.c_str());
+    printf("Writing GGUF data to %s...\n", params.out_file.c_str());
+    if (!writer.llama_gguf_writer_write_to_file(params.out_file)) {
+        fprintf(stderr, "error: Failed to write GGUF file %s\n", params.out_file.c_str());
         return false;
     }
 
     printf("Conversion successful!\n");
-    printf("Output file: %s\n", params.output_path.c_str());
+    printf("Output file: %s\n", params.out_file.c_str());
 
     return true;
 }

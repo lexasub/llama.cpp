@@ -1196,7 +1196,6 @@ bool common_params_parse(int argc, char ** argv, common_params & params, llama_e
             common_params_print_completion(ctx_arg);
             exit(0);
         }
-        params.lr.init();
     } catch (const std::invalid_argument & ex) {
         fprintf(stderr, "%s\n", ex.what());
         ctx_arg.params = params_org;
@@ -1540,7 +1539,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             }
             params.in_files.push_back(value);
         }
-    ).set_examples({LLAMA_EXAMPLE_IMATRIX}));
+    ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_FINETUNE}));
     add_opt(common_arg(
         {"-bf", "--binary-file"}, "FNAME",
         "binary file containing the prompt (default: none)",
@@ -3461,39 +3460,75 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
                        string_format("optimizer max # of epochs (default: %d)", params.lr.epochs),
                        [](common_params & params, int epochs) { params.lr.epochs = epochs; })
                 .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
-    add_opt(common_arg({ "-opt", "--optimizer" }, "sgd|adamw", "adamw or sgd",
-                       [](common_params & params, const std::string & name) {
-                           params.optimizer = common_opt_get_optimizer(name.c_str());
-                           if (params.optimizer == GGML_OPT_OPTIMIZER_TYPE_COUNT) {
-                               throw std::invalid_argument("invalid --optimizer, valid options: adamw, sgd");
-                           }
-                       })
-                .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+
+
+    add_opt(common_arg(
+        {"--dataset-format"}, " ",
+        string_format("type of input data (e.g., 'text', 'parquet') (default: %s)"),
+        [](common_params & params, const std::string & format) {
+            params.dataset_format = format; //TODO ENUM CLASS
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+
+    add_opt(common_arg(
+        {"--max-seq-len"}, " ",
+        string_format("max sequence length (default: %d)"),
+        [](common_params & params, int32_t max_seq_len) {
+            params.max_seq_len = max_seq_len;
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+
+    add_opt(common_arg(
+        {"--pre-tokenized"},
+        string_format("input file contains pre-tokenized data (space-separated token IDs)"),
+        [](common_params & params) {
+            params.pre_tokenized = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+
+    add_opt(common_arg(
+        {"--preview"},
+        string_format("read and print metadata and first sequence from the output GGUF file (enables preview)"),
+        [](common_params & params) {
+            params.do_preview = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+
+   add_opt(common_arg(
+        {"--preview-count"}, "<N>",
+        string_format("input file contains pre-tokenized data (space-separated token IDs)"),
+        [](common_params & params, int preview_count) {
+            params.preview_count = preview_count;
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+
+    add_opt(common_arg(
+        {"--detokenize-preview"},
+        string_format("detokenize previewed sequences (implies --preview)"),
+        [](common_params & params) {
+            params.detokenize_preview = params.do_preview = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
 
 #ifdef LLAMA_PARQUET
+
+
     add_opt(common_arg(
-        {"--dataset-format"}, "text",
-        string_format("Dataset format: text or parquet (requires LLAMA_PARQUET)"),
-        [](common_params & params, const std::string & format) {
-            params.dataset_format = format; //or parquet//TODO ENUM CLASS
+        {"--parquet-text-column"}, "<name>",
+        string_format("column name for raw text in Parquet files (default: 'text')"),
+        [](common_params & params, const std::string &parquet_text_column) {
+            params.parquet_text_column = parquet_text_column;
         }
     ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
 
     add_opt(common_arg(
-        {"--parquet-path"}, "parquet.parquet",
-        string_format("Parquet path"),
-        [](common_params & params, const std::string & filepath) {//TODO -read dir
-            params.parquet_path = filepath;
+        {"--parquet-tokens-column"}, "<name>",
+        string_format("column name for pre-tokenized data (list<int32>) in Parquet files (default: 'tokens')"),
+        [](common_params & params, const std::string &parquet_tokens_column) {
+            params.parquet_tokens_column = parquet_tokens_column;
         }
     ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
 
-    add_opt(common_arg(
-        {"--tokens-column"}, "tokens",
-        string_format("Name of tokens column (list<int32>) in Parquet file"),
-        [](common_params & params, const std::string & column) {
-            params.tokens_column = column;
-        }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
 #endif
     return ctx_arg;
 }

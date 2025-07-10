@@ -1,4 +1,5 @@
 #pragma once
+#ifdef LLAMA_PARQUET
 #include "llama.h"       // For llama_token
 
 // Include necessary Apache Arrow and Parquet headers
@@ -6,13 +7,12 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/reader.h>
-#include <parquet/file_reader.h>
 
 #include <memory>  // For std::unique_ptr
 #include <string>
 #include <vector>
 
-#include "llama-dataset-reader.h"
+#    include "llama-dataset-reader.h"
 
 // Implementation of DatasetReader for reading Parquet files.
 // This class will handle reading tokenized sequences from a Parquet file.
@@ -73,3 +73,4 @@ private:
     // Private helper to get the next batch of data (now a row group)
     bool llama_parquet_dataset_reader_get_next_batch();
 };
+#endif

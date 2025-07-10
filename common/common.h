@@ -306,8 +306,6 @@ struct common_params {
     std::string lookup_cache_dynamic = ""; // path of dynamic ngram cache file for lookup decoding          // NOLINT
     std::string logits_file          = ""; // file for saving *all* logits                                  // NOLINT
     std::string dataset_format = "text"; // "text" | "parquet"
-    std::string parquet_path;            // path to Parquet
-    std::string tokens_column = "tokens"; // name column list<int32>
 
     std::vector<std::string> in_files;   // all input files
     std::vector<std::string> antiprompt; // strings upon which more user input is prompted (a.k.a. reverse prompts)
@@ -382,7 +380,6 @@ struct common_params {
 
     // finetune
     struct lr_opt lr;
-    enum ggml_opt_optimizer_type optimizer = GGML_OPT_OPTIMIZER_TYPE_ADAMW;
     float val_split = 0.05f; // fraction of the data used for the validation set
     std::string opt_save_model_to = "finetuned-model.gguf";
 
@@ -475,6 +472,15 @@ struct common_params {
     // return false from callback to abort model loading or true to continue
     llama_progress_callback load_progress_callback = NULL;
     void *                  load_progress_callback_user_data = NULL;
+    int32_t max_seq_len = 2048;
+    bool do_preview = false;
+    bool pre_tokenized = false;
+    bool detokenize_preview = false;
+    int preview_count = 1;
+#ifdef LLAMA_PARQUET
+    std::string parquet_text_column = "text";
+    std::string parquet_tokens_column = "tokens";
+#endif
 };
 
 // call once at the start of a program if it uses libcommon
@@ -710,6 +716,3 @@ const char * const LLM_KV_SPLIT_TENSORS_COUNT = "split.tensors.count";
 //
 
 ggml_opt_dataset_t common_opt_dataset_init(struct llama_context * ctx, const std::vector<llama_token> & tokens, int64_t stride);
-
-// "adamw" or "sgd" (case insensitive)
-enum ggml_opt_optimizer_type common_opt_get_optimizer(const char *);

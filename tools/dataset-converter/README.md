@@ -10,7 +10,7 @@ Features
 
 *   **Flexible input**: Supports reading both raw text (with subsequent tokenization using a provided model) and pre-tokenized data (in the format of space-separated token IDs).
 
-*   **Modular architecture**: The code is divided into several classes (`GGUFFile`, `GGUFWriter`, `DataReader`, `TextDataReader`, `GGUFConverter`, `GGUFReader`) to improve modularity, extensibility, and testability.
+*   **Modular architecture**: The code is divided into several classes (`llama_gguf_file`, `llama_gguf_writer`, `llama_dataset_reader`, `llama_text_dataset_reader`, `llama_gguf_converter`, `llama_gguf_reader`) to improve modularity, extensibility, and testability.
 
 *   **Preview functionality**: Allows you to view metadata and the first few sequences of the generated GGUF file, including optional detokenization.
 
@@ -68,7 +68,7 @@ It is assumed that you have already set up the `llama.cpp` build environment (e.
 
 3.  **Configure and build the project using CMake**:
 
-        cmake ..
+        cmake -DLLAMA_PARQUET=ON ..
         cmake --build . --config Release
 
 
@@ -85,17 +85,21 @@ Usage
 
 *   `-h`, `--help`: Show this help message and exit.
 
-*   `-m <path>`, `--vocab-model <path>`: Path to the GGUF model used for the tokenizer (default: `models/7B/ggml-model-f16.gguf`).
+*   `-m <path>` : Path to the GGUF model used for the tokenizer (default: `models/7B/ggml-model-f16.gguf`).
 
-*   `-i <path>`, `--input <path>`: Path to the input text file (default: `input.txt`).
+*   `--in-file <path>`: Path to the input dataset file. For text input, this is a single file. For Parquet, this is the path to the Parquet file (default: `input.txt`).
 
 *   `-o <path>`, `--output <path>`: Path to save the output GGUF file (default: `output.gguf`).
 
-*   `-l <length>`, `--max-seq-len <length>`: Maximum sequence length in tokens (default: `2048`). Sequences exceeding this length will be truncated.
+*   ``--max-seq-len <length>`: Maximum sequence length in tokens (default: `2048`). Sequences exceeding this length will be truncated.
 
-*   `-p`, `--pre-tokenized`: Specifies that the input file contains pre-tokenized data (space-separated token IDs) rather than raw text.
+*   `--pre-tokenized`: Specifies that the input file contains pre-tokenized data (space-separated token IDs) rather than raw text.
 
-*   `-t <type>`, `--input-type <type>`: Type of input data (e.g., `text`, `parquet`). Currently, only `text` is supported.
+*   `--dataset-format <type>`: Type of input data (`text`, `parquet`). (default: `text`).
+
+*   `--parquet-text-column <name>`: For `parquet` input type, the column name containing raw text data (default: `text`).
+
+*   `--parquet-tokens-column <name>`: For `parquet` input type, the column name containing pre-tokenized data (list of int32) (default: `tokens`).
 
 *   `--preview`: Enables previewing of the generated GGUF file (prints metadata and the first few sequences).
 
@@ -118,7 +122,17 @@ Usage
 
     (Assumes `pre_tokenized_data.txt` contains lines like: `101 200 300 102 ...`)
 
-3.  **Converting with a preview of 5 sequences and detokenization**:
+3.  **Converting a Parquet file with raw text**:
+
+        ./bin/convert-to-train-gguf -m models/7B/ggml-model-f16.gguf -i my_parquet_dataset.parquet -o my_training_data.gguf -t parquet --parquet-text-column "document_text"
+
+
+4.  **Converting a Parquet file with pre-tokenized data**:
+
+        ./bin/convert-to-train-gguf -m models/7B/ggml-model-f16.gguf -i my_tokenized_parquet.parquet -o my_training_data.gguf -t parquet -p --parquet-tokens-column "token_ids"
+
+
+5.  **Converting with a preview of 5 sequences and detokenization**:
 
         ./bin/convert-to-train-gguf -m models/7B/ggml-model-f16.gguf -i my_dataset.txt -o my_training_data.gguf --preview --preview-count 5 --detokenize-preview
 
@@ -126,8 +140,6 @@ Usage
 
 Future Improvements
 -------------------
-
-*   **Parquet Support**: Implementation of `ParquetDataReader` for efficient reading of data from Parquet files.
 
 *   **Improved Error Handling**: More detailed messages and handling of edge cases.
 

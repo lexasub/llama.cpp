@@ -3,16 +3,15 @@ include_directories(.)
 if(LLAMA_PARQUET)
     find_package(Arrow REQUIRED)
     find_package(Parquet REQUIRED)
-    add_definitions(-DLLAMA_PARQUET)
 endif()
 
 add_library(dataset-to-gguf-lib
         dataset-to-gguf/llama-gguf-writer.cpp
         dataset-to-gguf/llama-gguf-file.cpp
-        dataset-to-gguf/llama-text-data-reader.cpp
+        dataset-to-gguf/llama-dataset-reader/llama-text-data-reader.cpp
         dataset-to-gguf/llama-gguf-converter.cpp
         dataset-to-gguf/llama-gguf-reader.cpp
-        dataset-to-gguf/llama-parquet-data-reader.cpp
+        dataset-to-gguf/llama-dataset-reader/llama-parquet-data-reader.cpp
 )
 
 # Link libraries for dataset-to-gguf-lib

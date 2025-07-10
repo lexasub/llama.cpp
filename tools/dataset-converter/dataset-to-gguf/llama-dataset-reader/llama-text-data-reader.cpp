@@ -1,7 +1,10 @@
-#include "llama-text-data-reader.h" // Include the new header name
-#include "llama.h"                  // For llama_tokenize, llama_model_get_vocab
-#include <algorithm>                // For std::min
-#include <iostream>                 // For std::cerr
+#include "llama-text-data-reader.h"
+
+#include <algorithm>                 // For std::min
+#include <iostream>                  // For std::cerr
+#include <sstream>
+
+#include "llama.h"  // For llama_tokenize, llama_model_get_vocab
 
 // Constructor
 llama_text_dataset_reader::llama_text_dataset_reader(const struct llama_model * model, int32_t max_seq_len, bool pre_tokenized)

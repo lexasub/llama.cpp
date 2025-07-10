@@ -1,6 +1,7 @@
-#include "llama-parquet-data-reader.h" // Include the new header name
+#ifdef LLAMA_PARQUET
+#    include "llama-parquet-data-reader.h"
 
-#include <algorithm> // For std::min
+#    include <algorithm> // For std::min
 #include <iostream>  // For std::cerr
 
 // Constructor
@@ -275,3 +276,4 @@ uint64_t llama_parquet_dataset_reader::total_sequences() const {
     // Total number of rows in the Parquet file
     return parquet_reader_->parquet_reader()->metadata()->num_rows();
 }
+#endif

@@ -1,7 +1,5 @@
 #include "llama-gguf-reader.h" // Include the new header name
 
-#include <algorithm> // For std::min
-#include <cstring>   // For memcpy
 #include <fstream>   // For reading tensor data directly
 #include <iostream>  // For std::cerr
 #include <stdexcept> // For std::runtime_error
