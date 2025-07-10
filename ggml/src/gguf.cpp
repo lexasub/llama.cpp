@@ -1,6 +1,3 @@
-#include "ggml.h"
-#include "ggml-backend.h"
-#include "ggml-impl.h"
 #include "gguf.h"
 
 #include <cinttypes>
@@ -13,7 +10,12 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "ggml-backend.h"
+#include "ggml-impl.h"
+#include "ggml.h"
 
 template <typename T>
 struct type_to_gguf_type;
@@ -314,6 +316,14 @@ bool gguf_read_emplace_helper(const struct gguf_reader & gr, std::vector<struct 
         kv.emplace_back(key, value);
     }
     return true;
+}
+
+void * gguf_context_get_data(gguf_context * ctx) {
+    return ctx->data;
+}
+
+void gguf_context_set_data(gguf_context * ctx, void * data) {
+    ctx->data = data;
 }
 
 struct gguf_context * gguf_init_from_file_impl(FILE * file, struct gguf_init_params params) {
@@ -924,6 +934,36 @@ int64_t gguf_find_tensor(const struct gguf_context * ctx, const char * name) {
     }
 
     return tensor_id;
+}
+
+struct gguf_context * gguf_init_from_in_memory_data(const void * _metadata, uint32_t version, size_t alignment) {
+
+    const auto* metadata_map = reinterpret_cast<const std::unordered_map<std::string, std::string>*>(_metadata);
+
+    struct gguf_context * ctx = new gguf_context{};
+    ctx->version = version;
+    ctx->alignment = alignment;
+    ctx->offset = 0;
+    ctx->size = 0;
+    ctx->data = nullptr;
+    if (ctx == nullptr) {
+        GGML_LOG_ERROR("%s: failed to allocate gguf_context\n", __func__);
+        return nullptr;
+    }
+
+    ctx->kv.reserve(metadata_map->size());
+    for (const auto& pair : *metadata_map) {
+        gguf_kv kv{pair.first, pair.second};
+        ctx->kv.emplace_back(kv);
+    }
+
+    if (ctx->alignment == 0 || (ctx->alignment & (ctx->alignment - 1)) != 0) {
+        GGML_LOG_ERROR("%s: alignment %zu is not a power of 2\n", __func__, ctx->alignment);
+        gguf_free(ctx);
+        return nullptr;
+    }
+
+    return ctx;
 }
 
 size_t gguf_get_tensor_offset(const struct gguf_context * ctx, int64_t tensor_id) {

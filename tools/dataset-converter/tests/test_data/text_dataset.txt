@@ -1,0 +1,5 @@
+This is a test sentence for the dataset loader.
+Another test sentence with different words.
+A third line to test the text loader functionality.
+This dataset is used for testing the simple dataset loader interface.
+Each line should be tokenized and stored as a separate sequence.

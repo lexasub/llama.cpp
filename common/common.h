@@ -8,7 +8,6 @@
 #include <string_view>
 #include <vector>
 #include <map>
-#include <sstream>
 #include <cmath>
 
 #include "ggml-opt.h"
@@ -326,6 +325,7 @@ struct common_params {
     std::string lookup_cache_static  = ""; // path of static ngram cache file for lookup decoding           // NOLINT
     std::string lookup_cache_dynamic = ""; // path of dynamic ngram cache file for lookup decoding          // NOLINT
     std::string logits_file          = ""; // file for saving *all* logits                                  // NOLINT
+    std::string dataset_format = "text"; // "text" | "parquet"
 
     std::vector<std::string> in_files;   // all input files
     std::vector<std::string> antiprompt; // strings upon which more user input is prompted (a.k.a. reverse prompts)
@@ -497,6 +497,10 @@ struct common_params {
     // return false from callback to abort model loading or true to continue
     llama_progress_callback load_progress_callback = NULL;
     void *                  load_progress_callback_user_data = NULL;
+    int32_t max_seq_len = 2048;
+    bool do_preview = false;
+    bool pre_tokenized = false;
+    std::string dataset_column = "data";
 };
 
 // call once at the start of a program if it uses libcommon

@@ -197,6 +197,14 @@ extern "C" {
     // writes the meta data to pointer "data"
     GGML_API void   gguf_get_meta_data(const struct gguf_context * ctx, void * data);
 
+    GGML_API void   gguf_context_set_data(struct gguf_context * ctx, void * data);
+    GGML_API void *  gguf_context_get_data(struct gguf_context * ctx);
+    GGML_API struct gguf_context * gguf_init_from_in_memory_data(
+        const void* metadata,
+        uint32_t version,
+        size_t alignment
+    );
+
 #ifdef  __cplusplus
 }
 #endif
