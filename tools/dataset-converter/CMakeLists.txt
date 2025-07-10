@@ -38,7 +38,7 @@ target_link_libraries(${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS} PRIVATE common
 target_compile_features(${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS} PRIVATE cxx_std_17)
 
 add_test(
-        NAME ${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS} # Имя теста, которое будет отображаться в CTest
-        COMMAND $<TARGET_FILE:${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS}> # Команда для запуска теста
-        LABEL "training" # Опциональная метка для группировки тестов (например, "training" или "unit")
+        NAME ${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS} #
+        COMMAND $<TARGET_FILE:${TEST_TARGET_GGUF_DATASET_CONVERTER_TESTS}>
+        LABEL "training"
 )
