@@ -450,6 +450,7 @@ struct common_params {
     bool do_preview = false;
     bool pre_tokenized = false;
     std::string dataset_column = "data";
+    std::string lora_adapter;
 };
 
 // call once at the start of a program if it uses libcommon
