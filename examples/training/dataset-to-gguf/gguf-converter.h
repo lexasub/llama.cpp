@@ -15,6 +15,8 @@ struct ConvertParams {
     bool pre_tokenized;
     std::string input_type;
     const struct llama_model* model; // Указатель на загруженную модель
+    std::string parquet_text_column;
+    std::string parquet_tokens_column;
 };
 
 // Класс GGUFConverter инкапсулирует высокоуровневую логику конвертации

@@ -20,7 +20,7 @@ bool GGUFConverter::convert(const ConvertParams& params) {
     if (params.input_type == "text") {
         reader = std::make_unique<TextDatasetReader>(params.model, params.max_seq_len, params.pre_tokenized);
     } else if (params.input_type == "parquet") {
-        reader = std::make_unique<ParquetDatasetReader>(params.model, params.max_seq_len, params.pre_tokenized);
+        reader = std::make_unique<ParquetDatasetReader>(params.model, params.max_seq_len, params.pre_tokenized, params.parquet_text_column, params.parquet_tokens_column);
     } else {
         fprintf(stderr, "error: Unsupported input type: %s\n", params.input_type.c_str());
         return false;

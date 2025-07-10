@@ -26,7 +26,6 @@
 #include "common.h"                               // Для общих утилит, если требуются (например, common_params)
 #include "dataset-to-gguf/gguf-converter.h"       // Включаем наш новый класс GGUFConverter
 #include "dataset-to-gguf/gguf-reader.h"          // Включаем наш новый класс GGUFReader
-#include "dataset-to-gguf/parquet-reader.h"  // Включаем ParquetDataReader
 #include "llama.h"  // Для llama_backend_init, llama_backend_free, llama_model_load_from_file, llama_model_free
 
 // Структура для хранения параметров командной строки
@@ -40,6 +39,8 @@ struct training_data_params {
     bool        do_preview    = false;                           // Флаг: если true, выполнить предварительный просмотр
     int32_t     preview_count = 1;                               // Количество последовательностей для предварительного просмотра
     bool        detokenize_preview = false;                      // Флаг: если true, детокенизировать предварительный просмотр
+    std::string parquet_text_column = "text";                    // Имя столбца с текстом в Parquet файле
+    std::string parquet_tokens_column = "tokens";                // Имя столбца с токенами в Parquet файле
 };
 
 // Предварительная декларация функции парсинга параметров
@@ -74,6 +75,10 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
         } else if (arg == "--detokenize-preview") {
             params.detokenize_preview = true;
             params.do_preview = true; // Включаем предварительный просмотр, если указана детокенизация
+        } else if (arg == "--parquet-text-column") {
+            params.parquet_text_column = argv[++i];
+        } else if (arg == "--parquet-tokens-column") {
+            params.parquet_tokens_column = argv[++i];
         } else if (arg == "-h" || arg == "--help") {
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
@@ -87,6 +92,8 @@ void training_data_params_parse(int argc, char **argv, training_data_params &par
             printf("  --preview             read and print metadata and first sequence from the output GGUF file (enables preview)\n");
             printf("  --preview-count <N>   number of sequences to preview (default: 1, implies --preview)\n");
             printf("  --detokenize-preview  detokenize previewed sequences (implies --preview)\n");
+            printf("  --parquet-text-column <name>  column name for raw text in Parquet files (default: 'text')\n");
+            printf("  --parquet-tokens-column <name> column name for pre-tokenized data (list<int32>) in Parquet files (default: 'tokens')\n");
             exit(0);
         } else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -111,6 +118,10 @@ int main(int argc, char **argv) {
     if (params_raw.do_preview) {
         printf("  Preview count: %d\n", params_raw.preview_count);
         printf("  Detokenize preview: %s\n", params_raw.detokenize_preview ? "Yes" : "No");
+    }
+    if (params_raw.input_type == "parquet") {
+        printf("  Parquet text column: %s\n", params_raw.parquet_text_column.c_str());
+        printf("  Parquet tokens column: %s\n", params_raw.parquet_tokens_column.c_str());
     }
     printf("\n");
 
@@ -160,6 +171,8 @@ int main(int argc, char **argv) {
     convert_params.pre_tokenized = params_raw.pre_tokenized;
     convert_params.input_type = params_raw.input_type;
     convert_params.model = model; // Передаем указатель на загруженную модель
+    convert_params.parquet_text_column = params_raw.parquet_text_column; // Передаем имя текстового столбца Parquet
+    convert_params.parquet_tokens_column = params_raw.parquet_tokens_column; // Передаем имя столбца токенов Parquet
 
     // Создаем и запускаем конвертер
     GGUFConverter converter;

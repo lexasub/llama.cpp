@@ -1,6 +1,4 @@
 #pragma once
-
-#include "dataset-reader.h" // Include the base DataReader class
 #include "llama.h"       // For llama_token
 
 // Include necessary Apache Arrow and Parquet headers
@@ -10,9 +8,11 @@
 #include <parquet/arrow/reader.h>
 #include <parquet/file_reader.h>
 
+#include <memory>  // For std::unique_ptr
 #include <string>
 #include <vector>
-#include <memory> // For std::unique_ptr
+
+#include "dataset-reader.h"
 
 // Implementation of DataReader for reading Parquet files.
 // This class will handle reading tokenized sequences from a Parquet file.
@@ -22,8 +22,10 @@ public:
     // model: Pointer to the llama model for tokenization (can be nullptr if data is pre-tokenized).
     // max_seq_len: Maximum sequence length for truncation.
     // pre_tokenized: If true, input data is already tokenized (token IDs in a numeric column).
-    // Note: For Parquet, 'pre_tokenized' implies reading a column of list<int32> or similar.
-    ParquetDatasetReader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized);
+    // text_column_name: Name of the column containing raw text data.
+    // tokens_column_name: Name of the column containing pre-tokenized data (list<int32>).
+    ParquetDatasetReader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized,
+                         const std::string& text_column_name, const std::string& tokens_column_name);
 
     // Destructor.
     ~ParquetDatasetReader();
@@ -53,18 +55,19 @@ private:
     std::shared_ptr<arrow::io::ReadableFile> input_file_; // Arrow file handle
     std::unique_ptr<parquet::arrow::FileReader> parquet_reader_; // Parquet reader
     std::shared_ptr<arrow::Table> current_table_; // Current table batch being processed
+    std::shared_ptr<arrow::ChunkedArray> chunked_array_; // Added: Member to store the chunked array
+
+    int current_row_group_index_;                 // Current row group index
+    std::shared_ptr<parquet::arrow::RowGroupReader> current_row_group_reader_; // Reader for the current row group
 
     int64_t current_row_in_table_; // Current row index within the current_table_
     int current_column_index_;     // Index of the column containing text/tokens
-    std::string m_filePath;
+    std::string m_filePath;        // Path to the Parquet file
 
-    // Private helper to get the next batch of data (if using batch processing)
+    std::string text_column_name_;   // Configurable name for the text column
+    std::string tokens_column_name_; // Configurable name for the tokens column
+
+    // Private helper to get the next batch of data (now a row group)
     bool get_next_batch();
-
-    // Determine the column index based on whether data is pre-tokenized or raw text
-    // This will need to be flexible based on your Parquet schema
-    // For simplicity, let's assume a fixed column name for text or tokens
-    const std::string text_column_name_ = "text";
-    const std::string tokens_column_name_ = "tokens"; // Assuming tokens are stored as list<int32>
 };
 
