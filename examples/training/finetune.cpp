@@ -9,8 +9,6 @@
 #include <ctime>
 #include <vector>
 
-#include "parquet_dataset.h"
-
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267)  // possible loss of data
 #endif
@@ -57,23 +55,9 @@ int main(int argc, char ** argv) {
         LOG_INF("%s\n", common_params_get_system_info(params).c_str());
     }
 
-    std::vector<llama_token> tokens;
-#ifdef LLAMA_PARQUET
-    if (params.dataset_format == "text") {
-#endif
-        tokens = common_tokenize(pctx, params.prompt, true); //load from text file
-#ifdef LLAMA_PARQUET
-    }
-    else if (params.dataset_format == "parquet") {
-        tokens = load_parquet_dataset(params.parquet_path, params.tokens_column);
-        if (tokens.empty()) {
-            LOG_ERR("No tokens in %s, or column %s not found/invalid", params.parquet_path.c_str(), params.tokens_column.c_str());
-            return 1;
-        }
-        LOG_INF("Loaded %zu tokens from Parquet", tokens.size());
-    }
-#endif
-    ggml_opt_dataset_t dataset = common_opt_dataset_init(pctx, tokens, llama_n_ctx(pctx) / 2);
+    std::vector<llama_token> tokens  = common_tokenize(pctx, params.prompt, true);
+    ggml_opt_dataset_t       dataset = common_opt_dataset_init(pctx, tokens, llama_n_ctx(pctx) / 2);
+
     struct lr_opt & lr = params.lr;
     LOG_INF("-optimizer %s -lr0 %.2g -wd %.2g -lr-min %.2g -min-epochs %.2g -epochs %d -period %.2g -val %.2g\n",
             ggml_opt_optimizer_name(params.optimizer), (double) lr.lr0, (double) lr.wd, (double) lr.lr_min, (double) lr.min_epochs,
