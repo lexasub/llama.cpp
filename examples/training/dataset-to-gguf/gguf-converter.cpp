@@ -1,15 +1,16 @@
 #include "gguf-converter.h"
 
-#include <cstdio>     // Для fprintf, snprintf
+#include <cinttypes>
+#include <cstdio>     // For fprintf, snprintf
 #include <iostream>
-#include <memory>     // Для std::unique_ptr
-#include <stdexcept>  // Для std::runtime_error
+#include <memory>     // For std::unique_ptr
+#include <stdexcept>  // For std::runtime_error
 #include <vector>
 
 #include "dataset-reader.h"
-#include "gguf-file.h"    // Для GGUFFile
-#include "gguf-writer.h"  // Для GGUFWriter
-#include "llama.h"        // Для llama_model_free, llama_backend_free
+#include "gguf-file.h"    // For GGUFFile
+#include "gguf-writer.h"  // For GGUFWriter
+#include "llama.h"        // For llama_model_free, llama_backend_free
 #include "parquet-reader.h"
 #include "text-reader.h"
 
@@ -32,15 +33,26 @@ bool GGUFConverter::convert(const ConvertParams& params) {
         return false;
     }
 
-    // --- ПЕРВЫЙ ПРОХОД: Сбор длин последовательностей ---
-    printf("First pass: Reading input data and getting sequence lengths...\n");
-    std::vector<uint32_t> sequence_lengths; // Будет хранить длины последовательностей
-    std::vector<llama_token> tokens;
+    uint64_t total_sequence_count = 0;
+    std::vector<uint32_t> sequence_lengths; // Будет хранить длины последовательностей для текстовых файлов
 
-    while (reader->read_next_sequence(tokens)) {
-        sequence_lengths.push_back(tokens.size());
+    // --- ПЕРВЫЙ ПРОХОД: Сбор длин последовательностей или получение общего количества ---
+    printf("First pass: Reading input data and getting sequence lengths...\n");
+
+    if (params.input_type == "parquet") {
+        // Для Parquet, получаем общее количество последовательностей из метаданных
+        total_sequence_count = reader->get_total_sequences();
+        printf("First pass complete. Found %" PRIu64 " sequences (from Parquet metadata).\n\n", total_sequence_count);
+    } else { // Для текстовых файлов
+        // Для текстовых файлов, выполняем полный первый проход для подсчета последовательностей
+        // и их длин (так как это единственный способ узнать точное количество токенов).
+        std::vector<llama_token> tokens;
+        while (reader->read_next_sequence(tokens)) {
+            sequence_lengths.push_back(tokens.size());
+        }
+        total_sequence_count = sequence_lengths.size();
+        printf("First pass complete. Found %" PRIu64 " sequences.\n\n", total_sequence_count);
     }
-    printf("First pass complete. Found %zu sequences.\n\n", sequence_lengths.size());
 
     // --- ЗАПИСЬ GGUF ФАЙЛА ---
     printf("Creating GGUF file...\n");
@@ -57,7 +69,7 @@ bool GGUFConverter::convert(const ConvertParams& params) {
     GGUFWriter writer(gguf_file.get());
 
     // Инициализируем метаданные GGUF файла
-    writer.init_metadata(params.model, params.input_path, sequence_lengths.size());
+    writer.init_metadata(params.model, params.input_path, total_sequence_count);
     printf("Metadata written.\n");
 
     // --- ВТОРОЙ ПРОХОД: Запись тензоров ---
@@ -68,20 +80,31 @@ bool GGUFConverter::convert(const ConvertParams& params) {
     }
 
     uint64_t current_sequence_idx = 0;
+    std::vector<llama_token> tokens; // Переиспользуем вектор токенов
     while (reader->read_next_sequence(tokens)) {
-        if (current_sequence_idx >= sequence_lengths.size()) {
-            fprintf(stderr, "error: file ended prematurely on second pass. Expected %zu sequences, but reached end of file at %lu.\n", sequence_lengths.size(), current_sequence_idx);
+        if (current_sequence_idx >= total_sequence_count) {
+            fprintf(stderr, "error: file ended prematurely on second pass. Expected %" PRIu64 " sequences, but reached end of file at %" PRIu64 ".\n", total_sequence_count, current_sequence_idx);
             break;
         }
 
-        uint32_t expected_n_tokens = sequence_lengths[current_sequence_idx];
+        uint32_t expected_n_tokens;
+        if (params.input_type == "text") {
+            // Для текстовых файлов используем длины, собранные на первом проходе
+            expected_n_tokens = sequence_lengths[current_sequence_idx];
+        } else {
+            // Для Parquet, мы не знаем ожидаемую длину заранее,
+            // поэтому просто используем фактическую длину прочитанной последовательности.
+            // Если Parquet-файл содержит пустые последовательности, они будут обработаны.
+            expected_n_tokens = tokens.size();
+        }
+
         uint32_t actual_n_tokens = tokens.size();
 
-        // Если количество токенов не совпадает, это критическая ошибка, так как
-        // метаданные, собранные на первом проходе, будут неверными для этого тензора.
+        // Если количество токенов не совпадает (только для текстовых, где мы это знаем заранее),
+        // это критическая ошибка, так как метаданные, собранные на первом проходе, будут неверными для этого тензора.
         // Прерываем конвертацию, чтобы избежать создания поврежденного GGUF файла.
-        if (actual_n_tokens != expected_n_tokens) {
-            fprintf(stderr, "error: Tokenization mismatch on second pass for sequence %lu. Expected %u tokens, got %u.\n", current_sequence_idx, expected_n_tokens, actual_n_tokens);
+        if (params.input_type == "text" && actual_n_tokens != expected_n_tokens) {
+            fprintf(stderr, "error: Tokenization mismatch on second pass for sequence %" PRIu64 ". Expected %u tokens, got %u.\n", current_sequence_idx, expected_n_tokens, actual_n_tokens);
             fprintf(stderr, "This indicates a non-deterministic tokenizer or an issue with input reading. Aborting conversion.\n");
             return false; // Прерываем конвертацию
         }
@@ -91,10 +114,12 @@ bool GGUFConverter::convert(const ConvertParams& params) {
             writer.add_sequence_tensor(current_sequence_idx, tokens);
         } else {
             // Если ожидалось 0 токенов, но строка не была пустой, выводим предупреждение
-            if (expected_n_tokens != 0) {
-                fprintf(stderr, "warning: sequence %lu resulted in 0 tokens on second pass, but expected %u.\n", current_sequence_idx, expected_n_tokens);
-                fprintf(stderr, "This indicates a non-deterministic tokenizer or an issue with input reading. Aborting conversion.\n");
-                return false; // Прерываем конвертацию
+            // (Это условие `expected_n_tokens != 0` актуально только для текстовых файлов,
+            // где мы могли получить 0 токенов на первом проходе для непустой строки.)
+            if (params.input_type == "text" && expected_n_tokens != 0) {
+                fprintf(stderr, "warning: sequence %" PRIu64 " resulted in 0 tokens on second pass, but expected %u.\n", current_sequence_idx, expected_n_tokens);
+                // Продолжаем, так как это может быть допустимо для некоторых датасетов,
+                // но предупреждаем о возможном несоответствии.
             }
         }
         current_sequence_idx++;

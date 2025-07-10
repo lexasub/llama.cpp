@@ -1,7 +1,10 @@
+
 #include "text-reader.h"
-#include "llama.h" // Для llama_tokenize, llama_model_get_vocab, llama_vocab_n_tokens, llama_vocab_get_text
+
+#include <algorithm>  // Для std::min
 #include <iostream>
-#include <algorithm> // Для std::min
+
+#include "llama.h"  // Для llama_tokenize, llama_model_get_vocab, llama_vocab_n_tokens, llama_vocab_get_text
 
 // Конструктор
 TextDatasetReader::TextDatasetReader(const struct llama_model* model, int32_t max_seq_len, bool pre_tokenized)
@@ -14,6 +17,7 @@ TextDatasetReader::~TextDatasetReader() {
 
 // Открывает текстовый файл для чтения
 bool TextDatasetReader::open(const std::string& path) {
+    file_path_ = path; // Store the file path
     input_file.open(path);
     if (!input_file.is_open()) {
         std::cerr << "Error: Failed to open input file " << path << std::endl;
@@ -81,5 +85,31 @@ bool TextDatasetReader::reset() {
         input_file.seekg(0, std::ios::beg); // Переместить указатель в начало
         return true;
     }
-    return false; // Файл не был открыт
+    // If not open, try to open it again using the stored path
+    return open(file_path_);
+}
+
+// Метод для получения общего количества последовательностей в датасете.
+// Для текстовых файлов это будет количество строк.
+// Примечание: Этот метод будет медленным для очень больших файлов,
+// так как он читает весь файл для подсчета строк.
+uint64_t TextDatasetReader::get_total_sequences() const {
+    if (file_path_.empty()) {
+        std::cerr << "Error (TextDatasetReader::get_total_sequences): File path not set." << std::endl;
+        return 0;
+    }
+
+    std::ifstream temp_file(file_path_);
+    if (!temp_file.is_open()) {
+        std::cerr << "Error (TextDatasetReader::get_total_sequences): Failed to open file '" << file_path_ << "' for counting lines." << std::endl;
+        return 0;
+    }
+
+    uint64_t count = 0;
+    std::string line;
+    while (std::getline(temp_file, line)) {
+        count++;
+    }
+    temp_file.close();
+    return count;
 }

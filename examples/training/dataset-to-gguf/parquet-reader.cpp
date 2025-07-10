@@ -264,3 +264,14 @@ bool ParquetDatasetReader::get_next_batch() {
     current_row_group_index_++; // Move to the next row group for the next call
     return true;
 }
+
+// Метод для получения общего количества последовательностей в датасете.
+// Для Parquet-файлов это будет количество строк, полученное из метаданных.
+uint64_t ParquetDatasetReader::get_total_sequences() const {
+    if (!parquet_reader_) {
+        std::cerr << "Error (ParquetDatasetReader::get_total_sequences): Parquet reader is not initialized." << std::endl;
+        return 0;
+    }
+    // Total number of rows in the Parquet file
+    return parquet_reader_->parquet_reader()->metadata()->num_rows();
+}

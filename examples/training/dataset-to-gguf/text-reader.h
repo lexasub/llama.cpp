@@ -1,11 +1,12 @@
 #pragma once
 
-#include "dataset-reader.h" // Включаем базовый класс DataReader
-#include "llama.h"       // Для llama_tokenize и llama_model
-#include <fstream>       // Для std::ifstream
-#include <string>        // Для std::string
-#include <vector>        // Для std::vector
-#include <sstream>       // Для std::istringstream
+#include <fstream>  // Для std::ifstream
+#include <sstream>  // Для std::istringstream
+#include <string>   // Для std::string
+#include <vector>   // Для std::vector
+
+#include "dataset-reader.h"
+#include "llama.h"  // Для llama_tokenize и llama_model
 
 // Реализация DataReader для чтения текстовых файлов.
 // Поддерживает как обычный текст, так и предварительно токенизированные данные.
@@ -34,11 +35,16 @@ public:
     // Сбрасывает файловый указатель к началу файла.
     bool reset() override;
 
+    // Метод для получения общего количества последовательностей в датасете.
+    // Для текстовых файлов это будет количество строк.
+    uint64_t get_total_sequences() const override;
+
 private:
     const struct llama_model* model; // Модель для токенизации
     int32_t max_seq_len;             // Максимальная длина последовательности
     bool pre_tokenized;              // Флаг предварительной токенизации
     std::ifstream input_file;        // Объект файлового потока
+    std::string file_path_;          // Путь к файлу для reset и get_total_sequences
     std::vector<llama_token> tokens_buffer; // Внутренний буфер для токенов
 };
 

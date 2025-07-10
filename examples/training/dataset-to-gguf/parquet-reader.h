@@ -47,6 +47,10 @@ public:
     // Returns true if reset is successful, otherwise false.
     bool reset() override;
 
+    // Метод для получения общего количества последовательностей в датасете.
+    // Для Parquet-файлов это будет количество строк, полученное из метаданных.
+    uint64_t get_total_sequences() const override;
+
 private:
     const struct llama_model* model_; // Llama model for tokenization (if needed)
     int32_t max_seq_len_;             // Maximum sequence length
