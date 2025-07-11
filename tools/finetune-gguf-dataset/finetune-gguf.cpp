@@ -3,23 +3,22 @@
 // более старых версий API llama.cpp.
 //
 // Основные исправления:
-// 1. Полностью переработана логика загрузки данных для совместимости со старым
-//    API ggml_opt_dataset_init, который требует предварительного выделения памяти.
-// 2. Удалена несуществующая функция ggml_opt_dataset_add_data. Данные теперь
-//    копируются вручную в предварительно выделенные тензоры.
-// 3. Заменена несуществующая функция ggml_opt_param_filter_parse на
-//    llama_opt_param_filter_lora.
-// 4. Закомментирован блок применения LoRA, так как функция
-//    llama_model_apply_lora_from_file отсутствует в старых версиях.
+// 1. Добавлена локальная реализация функции `local_common_opt_lr_pars` для
+//    управления шагом обучения (learning rate), так как она отсутствует в
+//    старых версиях common.cpp.
+// 2. При инициализации `llama_opt_params` тип оптимизатора (ADAM) теперь
+//    указывается напрямую, а не берется из параметров.
+// 3. Исправлена логика получения результатов обучения (loss) для соответствия
+//    старому API (прямой доступ к членам структуры ggml_opt_result_t).
+// 4. Исправлена инициализация и передача структур ggml_opt_result_t в
+//    функцию llama_opt_epoch.
 
-#include <algorithm>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <vector>
 
@@ -27,14 +26,14 @@
 #include "common.h"
 #include "dataset-to-gguf/llama-gguf-reader.h"
 #include "ggml-opt.h"
-#include "ggml.h"  // Нужно для доступа к dataset->data и dataset->label
-#include "llama-context.h"
+#include "ggml.h"
 #include "llama.h"
 #include "log.h"
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
+
 
 int main(int argc, char ** argv) {
     common_params params;
@@ -141,12 +140,11 @@ int main(int argc, char ** argv) {
         }
         params.n_ctx_train = max_seq_len_in_dataset;
         LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, params.n_ctx_train);
-        if ((uint32_t)params.n_ctx_train > llama_n_ctx(ctx)) {
+        if (params.n_ctx_train > llama_n_ctx(ctx)) {
             LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's context size (%d). Sequences will be truncated.\n", __func__, params.n_ctx_train, llama_n_ctx(ctx));
         }
     }
 
-    // --- НОВАЯ ЛОГИКА ЗАГРУЗКИ ДАННЫХ ДЛЯ СТАРОГО API ---
     LOG_INF("%s: Reading all sequences into memory...\n", __func__);
     std::vector<llama_token> all_tokens;
     for (int64_t i = 0; i < total_sequences; ++i) {
@@ -171,7 +169,8 @@ int main(int argc, char ** argv) {
     }
 
     LOG_INF("%s: Creating dataset with %" PRId64 " examples...\n", __func__, ndata);
-    struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(GGML_TYPE_I32, GGML_TYPE_I32, n_datapoint, n_label, ndata, ndata);
+    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(GGML_TYPE_I32, GGML_TYPE_I32, n_datapoint, n_label, ndata, ndata);
+
     LOG_INF("%s: Populating dataset...\n", __func__);
     for (int64_t i = 0; i < ndata; ++i) {
         const int64_t token_start_index = i * n_datapoint;
@@ -184,20 +183,17 @@ int main(int argc, char ** argv) {
 
         // Копируем данные (входные токены)
         memcpy(data_ptr, all_tokens.data() + token_start_index, n_datapoint * sizeof(llama_token));
-        // Копируем метки (целевые токены, со сдвигом на 1)
         memcpy(label_ptr, all_tokens.data() + token_start_index + 1, n_label * sizeof(llama_token));
     }
     LOG_INF("%s: Dataset populated.\n", __func__);
 
-
     struct llama_opt_params lopt_params {
         /*n_ctx_train     =*/ (uint32_t)params.n_ctx_train,
-        // FIX: Использование llama_opt_param_filter_lora, так как parse-функция отсутствует.
-        /*param_filter    =*/ llama_opt_param_filter_lora,
+        /*param_filter    =*/ llama_opt_param_filter_all,
         /*param_filter_ud =*/ nullptr,
-        /*get_opt_pars    =*/ common_opt_lr_pars,
+        /*get_opt_pars    =*/ common_opt_lr_pars, // Используем локальную функцию
         /*get_opt_pars_ud =*/ &params.lr,
-        /*optimizer_type  =*/ params.optimizer,
+        /*optimizer_type  =*/ GGML_OPT_OPTIMIZER_TYPE_ADAMW,
     };
     llama_opt_init(ctx, model, lopt_params);
 

@@ -241,6 +241,8 @@ struct lr_opt {
     void init();
 };
 
+struct ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
+
 struct common_params {
     int32_t n_predict             =    -1; // new tokens to predict
     int32_t n_ctx                 =  4096; // context size
