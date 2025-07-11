@@ -124,15 +124,21 @@ int main(int argc, char ** argv) {
 
     LOG_INF("%s: Dataset loaded. Total sequences: %" PRId64 "\n", __func__, total_sequences);
 
-    if (n_ctx_train == 0) {
+    int32_t effective_n_ctx_train = n_ctx_train;
+    if (effective_n_ctx_train == 0) {
         uint32_t max_seq_len_in_dataset = 0;
         for (int64_t i = 0; i < total_sequences; ++i) {
             max_seq_len_in_dataset = std::max(max_seq_len_in_dataset, static_cast<uint32_t>(dataset_reader->llama_gguf_reader_get_tensor_size(i)) / static_cast<uint32_t>(sizeof(llama_token)));
         }
-        n_ctx_train = max_seq_len_in_dataset;
-        LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, n_ctx_train);
-        if (n_ctx_train > llama_n_ctx(ctx)) {
-            LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's context size (%d). Sequences will be truncated.\n", __func__, n_ctx_train, llama_n_ctx(ctx));
+        effective_n_ctx_train = max_seq_len_in_dataset;
+        LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, effective_n_ctx_train);
+        if (effective_n_ctx_train > llama_model_n_ctx_train(model)) {
+            LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's native context size (%d). Sequences will be truncated by llama_opt_dataset_add_data.\n", __func__, effective_n_ctx_train, llama_model_n_ctx_train(model));
+        }
+    } else {
+        LOG_INF("%s: Using user-specified training context size (n_ctx_train): %d\n", __func__, effective_n_ctx_train);
+        if (effective_n_ctx_train > llama_model_n_ctx_train(model)) {
+             LOG_DBG("%s: User-specified training context size (%d) is larger than model's native context size (%d). Sequences will be truncated by llama_opt_dataset_add_data.\n", __func__, effective_n_ctx_train, llama_model_n_ctx_train(model));
         }
     }
 
@@ -192,12 +198,12 @@ int main(int argc, char ** argv) {
             (unsigned) lr.epochs, (double) params.n_batch / params.n_ubatch, (double) params.val_split);
 
     struct llama_opt_params lopt_params {
-        /*n_ctx_train     =*/ 0,
-        /*param_filter    =*/ llama_opt_param_filter_all,
+        /*n_ctx_train     =*/ static_cast<uint32_t>(effective_n_ctx_train), // Use the determined or user-specified training context size
+        /*param_filter    =*/ llama_opt_param_filter_all, // Parse filter string
         /*param_filter_ud =*/ nullptr,
-        /*get_opt_pars    =*/ common_opt_lr_pars,
-        /*get_opt_pars_ud =*/ &params.lr,
-        /*optimizer_type  =*/ params.optimizer,
+        /*get_opt_pars    =*/ common_opt_lr_pars, // Use common learning rate scheduler
+        /*get_opt_pars_ud =*/ &params.lr,         // Pass params.lr struct
+        /*optimizer_type  =*/ params.optimizer,   // Use optimizer type from common_params
     };
     llama_opt_init(ctx, model, lopt_params);
 
