@@ -1,46 +1,35 @@
-// Этот файл содержит исправленную версию кода для дообучения (finetuning)
-// модели с использованием датасета в формате GGUF, адаптированную для
-// более старых версий API llama.cpp.
-//
-// Основные исправления:
-// 1. Добавлена локальная реализация функции `local_common_opt_lr_pars` для
-//    управления шагом обучения (learning rate), так как она отсутствует в
-//    старых версиях common.cpp.
-// 2. При инициализации `llama_opt_params` тип оптимизатора (ADAM) теперь
-//    указывается напрямую, а не берется из параметров.
-// 3. Исправлена логика получения результатов обучения (loss) для соответствия
-//    старому API (прямой доступ к членам структуры ggml_opt_result_t).
-// 4. Исправлена инициализация и передача структур ggml_opt_result_t в
-//    функцию llama_opt_epoch.
+#include "arg.h"
+#include "common.h" // Still needed for common_init, common_params_parse, common_init_from_params, and logging
+#include "log.h"
+#include "llama.h"
+#include "ggml-opt.h"   // Explicitly include for ggml_opt_result definition
 
-#include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <memory>
-#include <stdexcept>
 #include <vector>
+#include <memory>    // For std::unique_ptr
+#include <stdexcept> // For std::runtime_error
 
-#include "arg.h"
-#include "common.h"
+// Include our GGUF dataset reader
+#include <cinttypes> // For PRIu64, PRId64
+
 #include "dataset-to-gguf/llama-gguf-reader.h"
-#include "ggml-opt.h"
-#include "ggml.h"
-#include "llama.h"
-#include "log.h"
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
-
 int main(int argc, char ** argv) {
     common_params params;
+    // Use LLAMA_EXAMPLE_FINETUNE to ensure relevant common parameters are parsed.
+    // common_params_parse also handles --help and basic validation.
     if (!common_params_parse(argc, argv, params, LLAMA_EXAMPLE_FINETUNE)) {
         return 1;
     }
 
+    // Additional checks for parameters specific to this finetune example
     if (params.in_files.empty()) {
         LOG_ERR("error: --input (dataset) is required.\n");
         return 1;
@@ -54,9 +43,10 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    // Print parameters for verification
     printf("Parameters:\n");
     printf("  Base Model: %s\n", params.model.path.c_str());
-    printf("  Dataset: %s\n", params.in_files[0].c_str());
+    printf("  Dataset: %s\n", params.in_files[0].c_str()); // Assuming only one dataset file for simplicity
     printf("  GPU Layers: %d\n", params.n_gpu_layers);
     printf("  Use mmap: %s\n", params.use_mmap ? "Yes" : "No");
     if (!params.lora_adapters.empty()) {
@@ -151,12 +141,22 @@ int main(int argc, char ** argv) {
     for (int64_t i = 0; i < total_sequences; ++i) {
         std::vector<llama_token> sequence_tokens;
         if (dataset_reader->llama_gguf_reader_read_tensor_data(i, sequence_tokens)) {
+            if (sequence_tokens.empty()) {
+                LOG_DBG("%s: Skipping empty sequence at index %" PRId64 ".\n", __func__, i);
+                continue;
+            }
+
             if (sequence_tokens.size() < 2) {
+                LOG_DBG("%s: Skipping sequence %" PRId64 " with less than 2 tokens (%zu).\n", __func__, i, sequence_tokens.size());
                 continue;
             }
             all_tokens.insert(all_tokens.end(), sequence_tokens.begin(), sequence_tokens.end());
+
+        } else {
+            LOG_ERR("%s: Failed to read sequence at index %" PRId64 " from GGUF dataset. Skipping.\n", __func__, i);
         }
     }
+
     LOG_INF("%s: Total tokens in memory: %zu\n", __func__, all_tokens.size());
 
     const int64_t n_datapoint = n_ctx_train - 1;
@@ -183,6 +183,7 @@ int main(int argc, char ** argv) {
         memcpy(data_ptr, all_tokens.data() + token_start_index, n_datapoint * sizeof(llama_token));
         memcpy(label_ptr, all_tokens.data() + token_start_index + 1, n_label * sizeof(llama_token));
     }
+
     LOG_INF("%s: Dataset populated.\n", __func__);
 
     struct lr_opt & lr = params.lr;
@@ -210,11 +211,16 @@ int main(int argc, char ** argv) {
         llama_opt_epoch(ctx, dataset, result_train, result_eval, idata_split,
             ggml_opt_epoch_callback_progress_bar, ggml_opt_epoch_callback_progress_bar);
         fprintf(stderr, "\n");
-        double loss;
-        double unc;
-        ggml_opt_result_loss(result_train, &loss, &unc);
-        //ggml_opt_result_eval(result_train, &loss, &unc);
-        LOG_INF("%s: Epoch %d results: Train Loss = %f\n", __func__, params.lr.epoch + 1, loss); //, Eval Loss = %f
+        double train_loss = 0.0;
+        double train_unc = 0.0;
+        ggml_opt_result_loss(result_train, &train_loss, &train_unc);
+
+        double eval_loss = 0.0;
+        double eval_unc = 0.0;
+        ggml_opt_result_loss(result_eval, &eval_loss, &eval_unc);
+
+        LOG_INF("%s: Epoch %d results: Train Loss = %f, Eval Loss = %f\n", __func__, params.lr.epoch + 1,
+            train_loss, eval_loss);
 
         ggml_opt_result_reset(result_train);
         ggml_opt_result_reset(result_eval);

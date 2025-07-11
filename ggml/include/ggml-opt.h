@@ -153,6 +153,8 @@ extern "C" {
     // get the gradient accumulator for a node from the forward graph
     GGML_API struct ggml_tensor * ggml_opt_grad_acc(ggml_opt_context_t opt_ctx, struct ggml_tensor * node);
 
+    GGML_API const char * ggml_opt_optimizer_name(enum ggml_opt_optimizer_type);
+
     // ====== Optimization Result ======
 
     GGML_API ggml_opt_result_t ggml_opt_result_init(void);

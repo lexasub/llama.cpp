@@ -1035,3 +1035,14 @@ void ggml_opt_fit(
     ggml_opt_result_free(result_train);
     ggml_opt_result_free(result_val);
 }
+
+GGML_API const char * ggml_opt_optimizer_name(enum ggml_opt_optimizer_type o) {
+    switch (o) {
+        case GGML_OPT_OPTIMIZER_TYPE_ADAMW:
+            return "adamw";
+        case GGML_OPT_OPTIMIZER_TYPE_SGD:
+            return "sgd";
+        default:
+            return "undefined";
+    };
+}
