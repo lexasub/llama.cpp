@@ -31,7 +31,7 @@ int main(int argc, char ** argv) {
 
     // Additional checks for parameters specific to this finetune example
     if (params.in_files.empty()) {
-        LOG_ERR("error: --input (dataset) is required.\n");
+        LOG_ERR("error: --in-file (dataset) is required.\n");
         return 1;
     }
     if (params.lr.epochs <= 0) {
