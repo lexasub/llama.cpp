@@ -1,4 +1,4 @@
-include_directories(.)
+include_directories(. ../../src/)
 include_directories(../dataset-converter)
 
 add_executable(finetune-gguf finetune-gguf.cpp)

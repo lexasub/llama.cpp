@@ -1,33 +1,36 @@
 // Этот файл содержит исправленную версию кода для дообучения (finetuning)
-// модели с использованием датасета в формате GGUF.
+// модели с использованием датасета в формате GGUF, адаптированную для
+// более старых версий API llama.cpp.
 //
 // Основные исправления:
-// 1. Заменены устаревшие вызовы API `llama_opt_*` на современные `ggml_opt_*`.
-// 2. Исправлена работа со структурой `ggml_opt_result_t`:
-//    - Структуры теперь создаются на стеке.
-//    - Удалены вызовы несуществующих функций `ggml_opt_result_init` и `ggml_opt_result_free`.
-//    - В функцию `llama_opt_epoch` передаются указатели на структуры.
-//    - Доступ к полям структуры осуществляется через оператор ".".
-// 3. Заменена устаревшая функция `llama_model_n_ctx` на `llama_n_ctx`.
-// 4. Остальные вызовы, такие как `llama_model_apply_lora_from_file`, оставлены без изменений,
-//    так как они корректны для современных версий llama.cpp. Убедитесь, что ваш репозиторий
-//    полностью обновлен.
+// 1. Полностью переработана логика загрузки данных для совместимости со старым
+//    API ggml_opt_dataset_init, который требует предварительного выделения памяти.
+// 2. Удалена несуществующая функция ggml_opt_dataset_add_data. Данные теперь
+//    копируются вручную в предварительно выделенные тензоры.
+// 3. Заменена несуществующая функция ggml_opt_param_filter_parse на
+//    llama_opt_param_filter_lora.
+// 4. Закомментирован блок применения LoRA, так как функция
+//    llama_model_apply_lora_from_file отсутствует в старых версиях.
 
-#include "common.h"
-#include "log.h"
-#include "llama.h"
-#include "ggml-opt.h"
-
+#include <algorithm>
+#include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <vector>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
-#include <cinttypes>
+#include <vector>
 
+#include "arg.h"
+#include "common.h"
 #include "dataset-to-gguf/llama-gguf-reader.h"
+#include "ggml-opt.h"
+#include "ggml.h"  // Нужно для доступа к dataset->data и dataset->label
+#include "llama-context.h"
+#include "llama.h"
+#include "log.h"
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -87,6 +90,9 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    /*
+    // FIX: Закомментировано из-за отсутствия функции в старых версиях API.
+    // Для использования этой функциональности, пожалуйста, обновите вашу версию llama.cpp.
     if (!params.lora_adapter.empty()) {
         if (params.lora_base.empty()) {
             LOG_ERR("%s: --lora-base is required when --lora-adapter is used\n", __func__);
@@ -99,6 +105,7 @@ int main(int argc, char ** argv) {
         }
         LOG_INF("%s: applied LoRA adapter from '%s' with base '%s'\n", __func__, params.lora_adapter.c_str(), params.lora_base.c_str());
     }
+    */
 
     {
         LOG_INF("\n");
@@ -134,35 +141,59 @@ int main(int argc, char ** argv) {
         }
         params.n_ctx_train = max_seq_len_in_dataset;
         LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, params.n_ctx_train);
-        // FIX: Use llama_n_ctx(ctx) to get the context size of the loaded model/context.
         if ((uint32_t)params.n_ctx_train > llama_n_ctx(ctx)) {
             LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's context size (%d). Sequences will be truncated.\n", __func__, params.n_ctx_train, llama_n_ctx(ctx));
         }
     }
 
-    // FIX: Use ggml_opt_dataset_* functions and types.
-    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(ctx, params.n_ctx_train);
-
+    // --- НОВАЯ ЛОГИКА ЗАГРУЗКИ ДАННЫХ ДЛЯ СТАРОГО API ---
+    LOG_INF("%s: Reading all sequences into memory...\n", __func__);
+    std::vector<llama_token> all_tokens;
     for (int64_t i = 0; i < total_sequences; ++i) {
         std::vector<llama_token> sequence_tokens;
         if (dataset_reader->llama_gguf_reader_read_tensor_data(i, sequence_tokens)) {
             if (sequence_tokens.size() < 2) {
-                LOG_DBG("%s: Skipping sequence %" PRId64 " with less than 2 tokens (%zu).\n", __func__, i, sequence_tokens.size());
                 continue;
             }
-            // FIX: Use ggml_opt_dataset_add_data.
-            ggml_opt_dataset_add_data(dataset, sequence_tokens.data(), sequence_tokens.size());
-        } else {
-            LOG_ERR("%s: Failed to read sequence at index %" PRId64 " from GGUF dataset. Skipping.\n", __func__, i);
+            all_tokens.insert(all_tokens.end(), sequence_tokens.begin(), sequence_tokens.end());
         }
     }
+    LOG_INF("%s: Total tokens in memory: %zu\n", __func__, all_tokens.size());
 
-    LOG_INF("%s: Total data points in dataset: %" PRId64 "\n", __func__, ggml_opt_dataset_ndata(dataset));
+    const int64_t n_ctx_train = params.n_ctx_train;
+    const int64_t n_datapoint = n_ctx_train - 1;
+    const int64_t n_label     = n_ctx_train - 1;
+    const int64_t ndata       = (all_tokens.size() - 1) / n_datapoint;
+
+    if (ndata == 0) {
+        LOG_ERR("%s: Not enough tokens to create even one training example.\n", __func__);
+        return 1;
+    }
+
+    LOG_INF("%s: Creating dataset with %" PRId64 " examples...\n", __func__, ndata);
+    struct ggml_opt_dataset * dataset = ggml_opt_dataset_init(GGML_TYPE_I32, GGML_TYPE_I32, n_datapoint, n_label, ndata, ndata);
+    LOG_INF("%s: Populating dataset...\n", __func__);
+    for (int64_t i = 0; i < ndata; ++i) {
+        const int64_t token_start_index = i * n_datapoint;
+
+        // Получаем указатели на данные и метки для текущего примера
+        llama_token* data_ptr  = reinterpret_cast<llama_token *>(
+            static_cast<char *>(ggml_opt_dataset_data(dataset)->data) + i * ggml_opt_dataset_data(dataset)->nb[1]);
+        llama_token* label_ptr = reinterpret_cast<llama_token *>(
+            static_cast<char *>(ggml_opt_dataset_labels(dataset)->data) + i * ggml_opt_dataset_labels(dataset)->nb[1]);
+
+        // Копируем данные (входные токены)
+        memcpy(data_ptr, all_tokens.data() + token_start_index, n_datapoint * sizeof(llama_token));
+        // Копируем метки (целевые токены, со сдвигом на 1)
+        memcpy(label_ptr, all_tokens.data() + token_start_index + 1, n_label * sizeof(llama_token));
+    }
+    LOG_INF("%s: Dataset populated.\n", __func__);
+
 
     struct llama_opt_params lopt_params {
         /*n_ctx_train     =*/ (uint32_t)params.n_ctx_train,
-        // FIX: Use ggml_opt_param_filter_parse.
-        /*param_filter    =*/ ggml_opt_param_filter_parse(params.param_filter.c_str()),
+        // FIX: Использование llama_opt_param_filter_lora, так как parse-функция отсутствует.
+        /*param_filter    =*/ llama_opt_param_filter_lora,
         /*param_filter_ud =*/ nullptr,
         /*get_opt_pars    =*/ common_opt_lr_pars,
         /*get_opt_pars_ud =*/ &params.lr,
@@ -172,27 +203,23 @@ int main(int argc, char ** argv) {
 
     const int64_t idata_split = ggml_opt_dataset_ndata(dataset) * (1.0f - params.val_split);
 
-    // FIX: Correct handling of ggml_opt_result_t.
-    // Declare on stack, no init/free needed.
     ggml_opt_result_t result_train;
     ggml_opt_result_t result_eval;
 
     for (params.lr.epoch = 0; params.lr.epoch < params.lr.epochs; ++params.lr.epoch) {
         LOG_INF("%s: Epoch %d/%d\n", __func__, params.lr.epoch + 1, params.lr.epochs);
-        
-        // Reset results for each epoch.
-        result_train = {0};
-        result_eval = {0};
 
-        // FIX: Pass pointers to the result structs.
-        llama_opt_epoch(ctx, dataset, &result_train, &result_eval, idata_split,
+        result_train = {nullptr};
+        result_eval = {nullptr};
+
+        llama_opt_epoch(ctx, dataset, result_train, result_eval, idata_split,
             ggml_opt_epoch_callback_progress_bar, ggml_opt_epoch_callback_progress_bar);
         fprintf(stderr, "\n");
-
-        // FIX: Access struct members with '.' instead of '->'.
-        LOG_INF("%s: Epoch %d results: Train Loss = %f, Eval Loss = %f\n", __func__, params.lr.epoch + 1,
-            (double)result_train.loss_sum / result_train.n_iter,
-            (double)result_eval.loss_sum / result_eval.n_iter);
+        double loss;
+        double unc;
+        ggml_opt_result_loss(result_train, &loss, &unc);
+        //ggml_opt_result_eval(result_train, &loss, &unc);
+        LOG_INF("%s: Epoch %d results: Train Loss = %f\n", __func__, params.lr.epoch + 1, loss); //, Eval Loss = %f
     }
 
     if (params.do_save) {
@@ -200,6 +227,7 @@ int main(int argc, char ** argv) {
         llama_model_save_to_file(model, params.out_file.c_str());
     }
 
+    // ggml_opt_dataset_free(dataset); // Если есть такая функция в вашей версии
     llama_backend_free();
 
     return 0;
