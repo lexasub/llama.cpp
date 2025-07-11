@@ -3424,6 +3424,72 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
+
+    add_opt(
+        common_arg({ "-lr", "--learning-rate-initial" }, "ALPHA",
+                   string_format(
+                       "adamw or sgd optimizer alpha (default: %.2g); note: sgd alpha recommended ~10x (no momentum)",
+                       (double) params.lr.lr0),
+                   [](common_params & params, const std::string & value) { params.lr.lr0 = std::stof(value); })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(
+        common_arg({ "-lr-min", "--learning-rate-min" }, "ALPHA",
+                   string_format(
+                       "(if >0) final learning rate (default=%.2g)",
+                       (double) params.lr.lr_min),
+                   [](common_params & params, const std::string & value) { params.lr.lr_min = std::stof(value); })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(
+        common_arg({ "-min-epochs", "--learning-rate-min-epochs" }, "ALPHA",
+                   string_format(
+                       "(if >0) reach -lr-min after this many epochs (instead of only at the last) (default=%.2g)",
+                       (double) params.lr.min_epochs),
+                   [](common_params & params, const std::string & value) { params.lr.min_epochs = std::stof(value); })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(common_arg(
+                { "-wd", "--weight-decay" }, "WD",
+                string_format(
+                    "adamw or sgd optimizer weight decay (0 is off; recommend very small e.g. 1e-9) (default: %.2g).",
+                    (double) params.lr.wd),
+                [](common_params & params, const std::string & value) { params.lr.wd = std::stof(value); })
+                .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(common_arg({ "-val", "--val-split" }, "FRACTION",
+                       string_format("fraction of data to use as validation set for training (default: %.2g).",
+                                     (double) params.val_split),
+                       [](common_params & params, const std::string & value) { params.val_split = std::stof(value); })
+                .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(common_arg({ "-epochs", "--epochs" }, "N",
+                       string_format("optimizer max # of epochs (default: %d)", params.lr.epochs),
+                       [](common_params & params, int epochs) { params.lr.epochs = epochs; })
+                .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+    add_opt(common_arg({ "-opt", "--optimizer" }, "sgd|adamw", "adamw or sgd",
+                       [](common_params & params, const std::string & name) {
+                           params.optimizer = common_opt_get_optimizer(name.c_str());
+                           if (params.optimizer == GGML_OPT_OPTIMIZER_TYPE_COUNT) {
+                               throw std::invalid_argument("invalid --optimizer, valid options: adamw, sgd");
+                           }
+                       })
+                .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+
+    add_opt(
+        common_arg({ "-lb", "--lora-base" }, "PATH",
+                   string_format("path to base model for LoRA (required if --lora-adapter is set) (default: %s)",
+                                 params.lora_base.c_str()),
+                   [](common_params & params, const std::string & value) { params.lora_base = value; })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+
+    add_opt(
+        common_arg({ "--no-save" },
+                   string_format("do not save the finetuned model (default: save)"),
+                   [](common_params & params) { params.do_save = false; })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+
+    add_opt(
+        common_arg({ "--save-path" }, "PATH",
+                   string_format("path to save the finetuned model (default: %s)", params.out_file.c_str()),
+                   [](common_params & params, const std::string & value) { params.out_file = value; })
+            .set_examples({ LLAMA_EXAMPLE_FINETUNE }));
+
     add_opt(common_arg(
         {"--dataset-format"}, " ",
         string_format("type of input data (e.g., 'text', 'parquet') (default: %s)", params.dataset_format.c_str()),

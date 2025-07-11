@@ -1557,6 +1557,26 @@ ggml_opt_optimizer_params common_opt_lr_pars(void * userdata) {
     return result;
 }
 
+static inline bool eq_case_insensitive(char const* a, char const* b) {
+    return !
+#if defined(_MSC_VER)
+        _stricmp
+#else
+        strcasecmp
+#endif
+        (a, b);
+}
+
+enum ggml_opt_optimizer_type common_opt_get_optimizer(const char * n) {
+    if (eq_case_insensitive("adamw", n)) {
+        return GGML_OPT_OPTIMIZER_TYPE_ADAMW;
+    } else if (eq_case_insensitive("sgd", n)) {
+        return GGML_OPT_OPTIMIZER_TYPE_SGD;
+    } else {
+        return GGML_OPT_OPTIMIZER_TYPE_COUNT;
+    }
+}
+
 static float const k_log_2 = std::log(2.f);
 
 void lr_opt::init() {

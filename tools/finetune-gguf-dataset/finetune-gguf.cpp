@@ -59,20 +59,19 @@ int main(int argc, char ** argv) {
     printf("  Dataset: %s\n", params.in_files[0].c_str());
     printf("  GPU Layers: %d\n", params.n_gpu_layers);
     printf("  Use mmap: %s\n", params.use_mmap ? "Yes" : "No");
-    if (!params.lora_adapter.empty()) {
-        printf("  LoRA Adapter: %s\n", params.lora_adapter.c_str());
+    if (!params.lora_adapters.empty()) {
+        printf("  LoRA Adapter: %s\n", params.lora_adapters[0].path.c_str());
+        printf("  LoRA Scale: %f\n", params.lora_adapters[0].scale);
         printf("  LoRA Base: %s\n", params.lora_base.c_str());
     }
     printf("  Learning Rate at first epoch: %f\n", params.lr.lr0);
     printf("  Epochs: %d\n", params.lr.epochs);
     printf("  Validation Split: %f\n", params.val_split);
-    printf("  Training Context: %d (0 = auto)\n", params.n_ctx_train);
-    printf("  Parameter Filter: %s\n", params.param_filter.c_str());
     printf("  Save Model: %s\n", params.do_save ? "Yes" : "No");
     if (params.do_save) {
         printf("  Save Path: %s\n", params.out_file.c_str());
     }
-    printf("  Threads: %d\n", params.n_threads);
+    printf("  Threads: %d\n", params.cpuparams.n_threads);
     printf("\n");
 
     common_init();
@@ -83,28 +82,30 @@ int main(int argc, char ** argv) {
 
     llama_model * model = model_ptr.get();
     llama_context * ctx = ctx_ptr.get();
+    uint32_t n_ctx_train = llama_model_n_ctx_train(model);
+    printf("  Training Context: %d (0 = auto)\n", n_ctx_train);
 
     if (model == nullptr) {
         LOG_ERR("%s: unable to load model\n", __func__);
         return 1;
     }
 
-    /*
+
     // FIX: Закомментировано из-за отсутствия функции в старых версиях API.
     // Для использования этой функциональности, пожалуйста, обновите вашу версию llama.cpp.
-    if (!params.lora_adapter.empty()) {
+    if (!params.lora_adapters.empty()) {
         if (params.lora_base.empty()) {
             LOG_ERR("%s: --lora-base is required when --lora-adapter is used\n", __func__);
             return 1;
         }
-        int err = llama_model_apply_lora_from_file(model, params.lora_adapter.c_str(), params.lora_base.c_str(), params.n_threads);
+        int err = 0;//llama_model_apply_lora_from_file(model, params.lora_adapters[0].path.c_str(), params.lora_base.c_str(), params.cpuparams.n_threads);
         if (err != 0) {
             LOG_ERR("%s: failed to apply lora adapter\n", __func__);
             return 1;
         }
-        LOG_INF("%s: applied LoRA adapter from '%s' with base '%s'\n", __func__, params.lora_adapter.c_str(), params.lora_base.c_str());
+        LOG_INF("%s: applied LoRA adapter from '%s' with base '%s'\n", __func__, params.lora_adapters[0].path.c_str(), params.lora_base.c_str());
     }
-    */
+
 
     {
         LOG_INF("\n");
@@ -133,15 +134,15 @@ int main(int argc, char ** argv) {
 
     LOG_INF("%s: Dataset loaded. Total sequences: %" PRId64 "\n", __func__, total_sequences);
 
-    if (params.n_ctx_train == 0) {
+    if (n_ctx_train == 0) {
         uint32_t max_seq_len_in_dataset = 0;
         for (int64_t i = 0; i < total_sequences; ++i) {
-            max_seq_len_in_dataset = std::max(max_seq_len_in_dataset, (uint32_t)dataset_reader->llama_gguf_reader_get_tensor_size(i) / (uint32_t)sizeof(llama_token));
+            max_seq_len_in_dataset = std::max(max_seq_len_in_dataset, static_cast<uint32_t>(dataset_reader->llama_gguf_reader_get_tensor_size(i)) / static_cast<uint32_t>(sizeof(llama_token)));
         }
-        params.n_ctx_train = max_seq_len_in_dataset;
-        LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, params.n_ctx_train);
-        if (params.n_ctx_train > llama_n_ctx(ctx)) {
-            LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's context size (%d). Sequences will be truncated.\n", __func__, params.n_ctx_train, llama_n_ctx(ctx));
+        n_ctx_train = max_seq_len_in_dataset;
+        LOG_INF("%s: Auto-determined training context size (n_ctx_train): %d\n", __func__, n_ctx_train);
+        if (n_ctx_train > llama_n_ctx(ctx)) {
+            LOG_DBG("%s: Auto-determined training context size (%d) is larger than model's context size (%d). Sequences will be truncated.\n", __func__, n_ctx_train, llama_n_ctx(ctx));
         }
     }
 
@@ -158,7 +159,6 @@ int main(int argc, char ** argv) {
     }
     LOG_INF("%s: Total tokens in memory: %zu\n", __func__, all_tokens.size());
 
-    const int64_t n_ctx_train = params.n_ctx_train;
     const int64_t n_datapoint = n_ctx_train - 1;
     const int64_t n_label     = n_ctx_train - 1;
     const int64_t ndata       = (all_tokens.size() - 1) / n_datapoint;
@@ -175,38 +175,37 @@ int main(int argc, char ** argv) {
     for (int64_t i = 0; i < ndata; ++i) {
         const int64_t token_start_index = i * n_datapoint;
 
-        // Получаем указатели на данные и метки для текущего примера
         llama_token* data_ptr  = reinterpret_cast<llama_token *>(
             static_cast<char *>(ggml_opt_dataset_data(dataset)->data) + i * ggml_opt_dataset_data(dataset)->nb[1]);
         llama_token* label_ptr = reinterpret_cast<llama_token *>(
             static_cast<char *>(ggml_opt_dataset_labels(dataset)->data) + i * ggml_opt_dataset_labels(dataset)->nb[1]);
 
-        // Копируем данные (входные токены)
         memcpy(data_ptr, all_tokens.data() + token_start_index, n_datapoint * sizeof(llama_token));
         memcpy(label_ptr, all_tokens.data() + token_start_index + 1, n_label * sizeof(llama_token));
     }
     LOG_INF("%s: Dataset populated.\n", __func__);
 
+    struct lr_opt & lr = params.lr;
+    LOG_INF("-optimizer %s -lr0 %.2g -wd %.2g -lr-min %.2g -min-epochs %.2g -epochs %d -period %.2g -val %.2g\n",
+            ggml_opt_optimizer_name(params.optimizer), (double) lr.lr0, (double) lr.wd, (double) lr.lr_min, (double) lr.min_epochs,
+            (unsigned) lr.epochs, (double) params.n_batch / params.n_ubatch, (double) params.val_split);
+
     struct llama_opt_params lopt_params {
-        /*n_ctx_train     =*/ (uint32_t)params.n_ctx_train,
+        /*n_ctx_train     =*/ 0,
         /*param_filter    =*/ llama_opt_param_filter_all,
         /*param_filter_ud =*/ nullptr,
-        /*get_opt_pars    =*/ common_opt_lr_pars, // Используем локальную функцию
+        /*get_opt_pars    =*/ common_opt_lr_pars,
         /*get_opt_pars_ud =*/ &params.lr,
-        /*optimizer_type  =*/ GGML_OPT_OPTIMIZER_TYPE_ADAMW,
+        /*optimizer_type  =*/ params.optimizer,
     };
     llama_opt_init(ctx, model, lopt_params);
 
     const int64_t idata_split = ggml_opt_dataset_ndata(dataset) * (1.0f - params.val_split);
 
-    ggml_opt_result_t result_train;
-    ggml_opt_result_t result_eval;
-
+    ggml_opt_result_t result_train = ggml_opt_result_init();
+    ggml_opt_result_t result_eval  = ggml_opt_result_init();
     for (params.lr.epoch = 0; params.lr.epoch < params.lr.epochs; ++params.lr.epoch) {
         LOG_INF("%s: Epoch %d/%d\n", __func__, params.lr.epoch + 1, params.lr.epochs);
-
-        result_train = {nullptr};
-        result_eval = {nullptr};
 
         llama_opt_epoch(ctx, dataset, result_train, result_eval, idata_split,
             ggml_opt_epoch_callback_progress_bar, ggml_opt_epoch_callback_progress_bar);
@@ -216,14 +215,18 @@ int main(int argc, char ** argv) {
         ggml_opt_result_loss(result_train, &loss, &unc);
         //ggml_opt_result_eval(result_train, &loss, &unc);
         LOG_INF("%s: Epoch %d results: Train Loss = %f\n", __func__, params.lr.epoch + 1, loss); //, Eval Loss = %f
-    }
 
+        ggml_opt_result_reset(result_train);
+        ggml_opt_result_reset(result_eval);
+    }
+    ggml_opt_result_free(result_train);
+    ggml_opt_result_free(result_eval);
     if (params.do_save) {
         LOG_INF("%s: Saving finetuned model to '%s'\n", __func__, params.out_file.c_str());
         llama_model_save_to_file(model, params.out_file.c_str());
     }
 
-    // ggml_opt_dataset_free(dataset); // Если есть такая функция в вашей версии
+    // ggml_opt_dataset_free(dataset);
     llama_backend_free();
 
     return 0;

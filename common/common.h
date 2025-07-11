@@ -472,10 +472,8 @@ struct common_params {
     std::string lora_base;
     struct lr_opt lr;
     float val_split = 0.05f; // fraction of the data used for the validation set
-    uint32_t n_ctx_train;
-    std::string param_filter;
-    bool do_save;
-    int n_threads;
+    bool do_save = true;
+    enum ggml_opt_optimizer_type optimizer = GGML_OPT_OPTIMIZER_TYPE_ADAMW;
 };
 
 // call once at the start of a program if it uses libcommon
@@ -711,3 +709,6 @@ const char * const LLM_KV_SPLIT_TENSORS_COUNT = "split.tensors.count";
 //
 
 ggml_opt_dataset_t common_opt_dataset_init(struct llama_context * ctx, const std::vector<llama_token> & tokens, int64_t stride);
+
+// "adamw" or "sgd" (case insensitive)
+enum ggml_opt_optimizer_type common_opt_get_optimizer(const char *);
