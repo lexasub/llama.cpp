@@ -225,6 +225,22 @@ enum common_reasoning_format {
     COMMON_REASONING_FORMAT_DEEPSEEK,        // Extract thinking tag contents and return as `message.reasoning_content`, including in streaming deltas.
 };
 
+struct lr_opt {
+    float    lr0             = 1e-5; // learning rate at first epoch
+    float    lr_min          = -1;
+    float    min_epochs      = -1;  // if >0, constant (lr_min) after this many epochs
+    float    scale_epoch    = 0;
+    float    wd              = 0;
+    unsigned epochs          = 2;
+
+    unsigned epoch; // set by optimizer outer (epochs) loop
+    // learning rate decay - constant LR per epoch only for now
+    float get_lr(float e) const;
+    float get_lr() const { return get_lr(epoch); }
+    // must call after arg parse, before get_lr
+    void init();
+};
+
 struct common_params {
     int32_t n_predict             =    -1; // new tokens to predict
     int32_t n_ctx                 =  4096; // context size
@@ -451,6 +467,13 @@ struct common_params {
     bool pre_tokenized = false;
     std::string dataset_column = "data";
     std::string lora_adapter;
+    std::string lora_base;
+    struct lr_opt lr;
+    float val_split = 0.05f; // fraction of the data used for the validation set
+    uint32_t n_ctx_train;
+    std::string param_filter;
+    bool do_save;
+    int n_threads;
 };
 
 // call once at the start of a program if it uses libcommon

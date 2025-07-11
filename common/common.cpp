@@ -1548,3 +1548,25 @@ ggml_opt_dataset_t common_opt_dataset_init(struct llama_context * ctx, const std
 
     return result;
 }
+
+static float const k_log_2 = std::log(2.f);
+
+void lr_opt::init() {
+    if (lr_min > 0 && lr_min < lr0) {
+        float nhalf = std::log(lr0 / lr_min) / k_log_2;
+        float e     = epochs;
+        if (min_epochs > 0 && min_epochs < e)
+            e = min_epochs;
+        else
+            min_epochs = e;
+        scale_epoch = nhalf / e;
+    }
+}
+
+float lr_opt::get_lr(float epoch) const {
+    float r = lr_min <= 0 ? lr0 :
+        epoch >= min_epochs ? lr_min :
+        lr0 * std::pow(.5, epoch * scale_epoch);
+    LOG_INF("epoch %.2g lr=%.2g\n", epoch, r);
+    return r;
+}
