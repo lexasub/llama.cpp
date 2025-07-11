@@ -2105,16 +2105,16 @@ void llama_context::opt_epoch_iter(
 }
 
 void llama_context::opt_epoch(
-        ggml_opt_dataset_t        dataset,
-        ggml_opt_result_t         result_train,
-        ggml_opt_result_t         result_eval,
-        int64_t                   idata_split,
-        ggml_opt_epoch_callback   callback_train,
-        ggml_opt_epoch_callback   callback_eval) {
+    ggml_opt_dataset_t        dataset,
+    ggml_opt_result_t         result_train,
+    ggml_opt_result_t         result_eval,
+    int64_t                   idata_split,
+    ggml_opt_epoch_callback   callback_train,
+    ggml_opt_epoch_callback   callback_eval) {
     const uint32_t n_ctx    = this->n_ctx();
-    const uint32_t n_batch  = std::min(cparams.n_batch,  n_ctx);
+    const uint32_t n_batch  = std::min(cparams.n_batch, n_ctx);
     const uint32_t n_ubatch = std::min(cparams.n_ubatch, n_batch);
-    const  int64_t ndata    = ggml_opt_dataset_ndata(dataset);
+    const int64_t ndata     = ggml_opt_dataset_ndata(dataset);
 
     GGML_ASSERT(idata_split >= 0);
     GGML_ASSERT(idata_split <= ndata);
@@ -2122,29 +2122,88 @@ void llama_context::opt_epoch(
     const uint32_t ubatch_per_ctx = n_ctx / n_ubatch;
 
     struct llama_batch batch = llama_batch_init(n_batch, 0, 1);
-    std::vector<llama_token>        tokens(n_ctx);
+    std::vector<llama_token> tokens(n_ctx);
     std::vector<llama_token> labels_sparse(n_ctx);
 
-    int64_t idata = 0;
+    // Ensure batch is cleared
+    batch.n_tokens = 0;
 
     int64_t t_loop_start = ggml_time_us();
-    int64_t ndata_in_loop = idata_split*ubatch_per_ctx;
-    for (; idata < idata_split; ++idata) {
-        constexpr bool train = true;
-        const int64_t idata_in_loop = idata*ubatch_per_ctx;
+    int64_t ndata_in_loop = idata_split * ubatch_per_ctx;
 
+    fprintf(stderr, "Starting training loop: idata_split = %ld, ndata = %ld, n_ctx = %u, n_batch = %u, n_ubatch = %u\n",
+            idata_split, ndata, n_ctx, n_batch, n_ubatch);
+
+    for (int64_t idata = 0; idata < idata_split; ++idata) {
+        constexpr bool train = true;
+        const int64_t idata_in_loop = idata * ubatch_per_ctx;
+
+        fprintf(stderr, "Training: idata = %ld, idata_in_loop = %ld\n", idata, idata_in_loop);
+
+        // Clear vectors
+        std::fill(tokens.begin(), tokens.end(), 0);
+        std::fill(labels_sparse.begin(), labels_sparse.end(), 0);
+
+        // Retrieve batch with correct size
         ggml_opt_dataset_get_batch_host(dataset, tokens.data(), n_ctx*sizeof(llama_token), labels_sparse.data(), idata);
+
+        fprintf(stderr, "Batch retrieved for training: idata = %ld\n", idata);
+
+        // Populate batch
+        batch.n_tokens = 0;
+        for (uint32_t i = 0; i < 511 && batch.n_tokens < n_batch; ++i) {
+            batch.token[batch.n_tokens] = tokens[i];
+            batch.pos[batch.n_tokens] = i;
+            batch.seq_id[batch.n_tokens] = 0;
+            batch.n_tokens++;
+        }
+        // Add label (assuming single-token label)
+        if (batch.n_tokens < n_batch) {
+            batch.token[batch.n_tokens] = labels_sparse[0];
+            batch.pos[batch.n_tokens] = 511;
+            batch.seq_id[batch.n_tokens] = 0;
+            batch.n_tokens++;
+        }
+
         opt_epoch_iter(dataset, result_train, tokens, labels_sparse, batch,
             callback_train, train, idata_in_loop, ndata_in_loop, t_loop_start);
     }
 
     t_loop_start = ggml_time_us();
-    ndata_in_loop = (ndata - idata_split)*ubatch_per_ctx;
-    for (; idata < ndata; ++idata) {
+    ndata_in_loop = (ndata - idata_split) * ubatch_per_ctx;
+
+    fprintf(stderr, "Starting validation loop: idata = %ld, ndata = %ld\n", idata_split, ndata);
+
+    for (int64_t idata = idata_split; idata < ndata; ++idata) {
         constexpr bool train = false;
-        const int64_t idata_in_loop = (idata - idata_split)*ubatch_per_ctx;
+        const int64_t idata_in_loop = (idata - idata_split) * ubatch_per_ctx;
+
+        fprintf(stderr, "Validation: idata = %ld, idata_in_loop = %ld\n", idata, idata_in_loop);
+
+        // Clear vectors
+        std::fill(tokens.begin(), tokens.end(), 0);
+        std::fill(labels_sparse.begin(), labels_sparse.end(), 0);
 
         ggml_opt_dataset_get_batch_host(dataset, tokens.data(), n_ctx*sizeof(llama_token), labels_sparse.data(), idata);
+
+        fprintf(stderr, "Batch retrieved for validation: idata = %ld\n", idata);
+
+        // Populate batch
+        batch.n_tokens = 0;
+        for (uint32_t i = 0; i < 511 && batch.n_tokens < n_batch; ++i) {
+            batch.token[batch.n_tokens] = tokens[i];
+            batch.pos[batch.n_tokens] = i;
+            batch.seq_id[batch.n_tokens] = 0;
+            batch.n_tokens++;
+        }
+        // Add label
+        if (batch.n_tokens < n_batch) {
+            batch.token[batch.n_tokens] = labels_sparse[0];
+            batch.pos[batch.n_tokens] = 511;
+            batch.seq_id[batch.n_tokens] = 0;
+            batch.n_tokens++;
+        }
+
         opt_epoch_iter(dataset, result_eval, tokens, labels_sparse, batch,
             callback_eval, train, idata_in_loop, ndata_in_loop, t_loop_start);
     }

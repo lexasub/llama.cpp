@@ -175,7 +175,7 @@ int main(int argc, char ** argv) {
     }
 
     LOG_INF("%s: Creating dataset with %" PRId64 " examples...\n", __func__, ndata);
-    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(GGML_TYPE_I32, GGML_TYPE_I32, n_datapoint, n_label, ndata, ndata);
+    ggml_opt_dataset_t dataset = ggml_opt_dataset_init(GGML_TYPE_I32, GGML_TYPE_I32, n_datapoint, n_label, ndata, 1);
 
     LOG_INF("%s: Populating dataset...\n", __func__);
     for (int64_t i = 0; i < ndata; ++i) {
