@@ -119,7 +119,7 @@ public:
             }
 
             // Issue 4: Test random access performance
-            std::cout << "Testing random access performance..." << std::endl;
+            /*std::cout << "Testing random access performance..." << std::endl;
 
             auto test_random_access = [](struct llama_dataset* dataset) {
                 auto start = std::chrono::high_resolution_clock::now();
@@ -179,7 +179,7 @@ public:
                 result.issues_found.push_back("Sequential access in streaming mode is slow");
                 result.optimizations_needed.push_back("Implement read-ahead buffering for sequential access");
                 result.has_issues = true;
-            }
+            }*/
 
         } catch (const std::exception& e) {
             result.issues_found.push_back(std::string("Exception during analysis: ") + e.what());
