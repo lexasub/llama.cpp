@@ -131,7 +131,7 @@ void StreamingOptimizationManager::set_read_ahead_enabled(bool enabled) {
 
 void StreamingOptimizationManager::set_adaptive_cache_enabled(bool enabled) {
     if (cache) {
-        cache->set_adaptive_sizing(enabled);
+        cache->set_adaptive_sizing(enabled, 0.8);
     }
 }
 

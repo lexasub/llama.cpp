@@ -177,12 +177,9 @@ bool llama_dataset_set_adaptive_cache_sizing(struct llama_dataset* dataset, bool
         return false;
     }
 
-    // Enable/disable adaptive sizing
-    cache->set_adaptive_sizing(enabled);
-
     // Update the optimization manager if it exists
     StreamingOptimizationManager* manager = get_optimization_manager(dataset);
-    if (manager) {
+    if (manager != nullptr) {
         manager->set_adaptive_cache_enabled(enabled);
     }
 
