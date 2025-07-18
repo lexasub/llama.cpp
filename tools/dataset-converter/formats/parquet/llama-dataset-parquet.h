@@ -1,10 +1,10 @@
 #pragma once
-
+#ifdef LLAMA_DATASET_PARQUET_SUPPORT
 #include "llama-dataset.h"
 
 /**
  * @brief Parquet dataset loader implementation.
- * 
+ *
  * This header contains functions for loading Parquet datasets.
  */
 
@@ -18,7 +18,7 @@
  * @param streaming Whether to use streaming mode
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * llama_dataset_load_parquet_internal(const char * path, bool streaming);
+struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params);
 
 /**
  * @brief Validate Parquet file schema.
@@ -28,7 +28,7 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const char * path, bo
  * @param path Path to the Parquet file
  * @return true if schema is valid, false otherwise
  */
-bool validate_parquet_schema(const char * path);
+bool llama_dataet_validate_parquet_schema(const char * path);
 
 /**
  * @brief Get metadata from Parquet file.
@@ -40,4 +40,5 @@ bool validate_parquet_schema(const char * path);
  * @param max_length Pointer to store maximum sequence length
  * @return true if successful, false otherwise
  */
-bool get_parquet_metadata(const char * path, uint64_t * n_sequences, int32_t * max_length);
+bool llama_dataset_get_parquet_metadata(const char * path, uint64_t * n_sequences, int32_t * max_length);
+#endif

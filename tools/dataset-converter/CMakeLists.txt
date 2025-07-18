@@ -70,7 +70,6 @@ target_link_libraries(streaming_analyzer PRIVATE dataset_convert_lib)
 add_executable(test_data_validator "${CMAKE_CURRENT_SOURCE_DIR}/tools/test-data-validation-tool.cpp")
 target_link_libraries(test_data_validator PRIVATE dataset_convert_lib)
 
-# Installation rule for the executable
 install(TARGETS dataset_converter streaming_analyzer test_data_validator
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )

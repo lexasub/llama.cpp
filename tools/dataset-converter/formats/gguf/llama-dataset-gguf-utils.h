@@ -15,7 +15,7 @@
  * @param ctx The GGUF context
  * @return The total size of the data section in bytes
  */
-size_t gguf_get_data_size(const struct gguf_context * ctx);
+size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx);
 
 /**
  * @brief Load all tensors from a GGUF context into a GGML context.
@@ -27,4 +27,4 @@ size_t gguf_get_data_size(const struct gguf_context * ctx);
  * @param ggml_ctx The GGML context to load tensors into
  * @return true if successful, false otherwise
  */
-bool gguf_load_tensors(const struct gguf_context * gguf_ctx, struct ggml_context * ggml_ctx);
+bool llama_dataset_gguf_load_tensors(const struct gguf_context * gguf_ctx, struct ggml_context * ggml_ctx);

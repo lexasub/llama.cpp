@@ -4,7 +4,7 @@
 
 /**
  * @brief Text dataset loader implementation.
- * 
+ *
  * This header contains functions for loading text datasets.
  */
 
@@ -19,4 +19,4 @@
  * @param streaming Whether to use streaming mode
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * llama_dataset_load_text_internal(const char * path, struct llama_model * model, bool streaming);
+struct llama_dataset * llama_dataset_load_text_internal(const common_params * params, struct llama_model * model);

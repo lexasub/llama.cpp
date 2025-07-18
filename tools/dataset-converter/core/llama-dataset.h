@@ -8,12 +8,9 @@
  * training datasets in different formats (GGUF, text, Parquet).
  */
 
-#include "../../ggml/include/gguf.h"
-#include "../../ggml/include/ggml.h"
-#include "../../include/llama.h"
-
 #include <stdint.h>
-#include <stdbool.h>
+#include "ggml/include/ggml.h"
+#include "include/llama.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,11 +27,20 @@ struct llama_dataset;
 /**
  * @brief Standard metadata key definitions for dataset properties.
  */
-#define DATASET_SEQUENCE_COUNT    "dataset.n_sequences"  // Number of sequences in the dataset
-#define DATASET_MAX_LENGTH        "dataset.max_length"   // Maximum sequence length
-#define DATASET_SOURCE_FORMAT     "dataset.source"       // Source format (gguf, text, parquet)
-#define DATASET_TOKENIZER         "dataset.tokenizer"    // Tokenizer model used
-#define DATASET_CREATION_TIME     "dataset.created"      // Creation timestamp
+/* TODO
+training.dataset.source: string (optional) - URL or description of the data source.
+training.tokenizer.gguf.vocab: array[string] - Tokenizer dictionary.
+training.tokenizer.gguf.merges: array[string] - Tokenizer merges (for BPE).
+training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture.
+*/
+#define TRAINING_FORMAT_VERSION    "training.format.version"      // int16 (e.g. 1000) - Specification version, in case of future changes.
+#define TRAINING_FORMAT_SOURCE     "training.format.source"       // Source format (gguf, text, parquet)
+#define TRAINING_DATASET_NAME      "training.dataset.name"        // string (optional) - Dataset name (e.g. "OpenWebText-ru").
+#define TRAINING_DATASET_DESCRIPTION "training.dataset.description" // string (optional) - Dataset description (e.g. "OpenWebText-ru").
+#define TRAINING_SEQUENCE_COUNT    "training.sequence.count"      // Number of sequences in the dataset
+#define TRAINING_MAX_LENGTH        "dataset.max_length"           // Maximum sequence length //TODO check
+#define TRAINING_TOKENIZER         "training.tokenizer.gguf.model"// Tokenizer model name (llama, gpt2, etc.).
+#define TRAINING_CREATION_TIME     "training.file.creation_date"  // string (ISO 8601) - File creation date.
 
 /**
  * @brief Dataset type enumeration for format identification.
@@ -63,14 +69,14 @@ enum dataset_error {
 //
 // Simple procedural interface - core functions
 //
-
+struct common_params;
 /**
  * @brief Load a dataset from a GGUF file.
  *
  * @param path Path to the GGUF file
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * from_gguf(const char * path);
+struct llama_dataset * llama_dataset_from_gguf(const common_params * params);
 
 /**
  * @brief Load a dataset from a text file and tokenize it.
@@ -79,7 +85,7 @@ struct llama_dataset * from_gguf(const char * path);
  * @param model Model to use for tokenization
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * from_txt(const char * path, struct llama_model * model);
+struct llama_dataset * llama_dataset_from_txt(const common_params * params, struct llama_model * model);
 
 /**
  * @brief Load a dataset from a Parquet file.
@@ -87,15 +93,16 @@ struct llama_dataset * from_txt(const char * path, struct llama_model * model);
  * @param path Path to the Parquet file
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * from_parquet(const char * path);
-
+#ifdef LLAMA_DATASET_PARQUET_SUPPORT
+struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
+#endif
 /**
  * @brief Save a dataset to a GGUF file.
  *
  * @param dataset Dataset to save
  * @param path Path to the output file
  */
-void to_gguf(struct llama_dataset * dataset, const char * path);
+void llama_dataset_to_gguf(struct llama_dataset * dataset, const char * path);
 
 /**
  * @brief Get the number of sequences in the dataset.
@@ -103,16 +110,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path);
  * @param dataset Dataset to query
  * @return Number of sequences, or 0 if dataset is NULL
  */
-uint64_t n_sequences(const struct llama_dataset * dataset);
-
-/**
- * @brief Get the length of a sequence in the dataset.
- *
- * @param dataset Dataset to query
- * @param index Index of the sequence
- * @return Length of the sequence, or 0 if dataset is NULL or index is out of bounds
- */
-int32_t sequence_length(const struct llama_dataset * dataset, uint64_t index);
+uint64_t llama_dataset_n_sequences(const struct llama_dataset * dataset);
 
 /**
  * @brief Get a pointer to the tokens in a sequence.
@@ -121,7 +119,7 @@ int32_t sequence_length(const struct llama_dataset * dataset, uint64_t index);
  * @param index Index of the sequence
  * @return Pointer to the tokens, or NULL if dataset is NULL or index is out of bounds
  */
-const int32_t * sequence(const struct llama_dataset * dataset, uint64_t index);
+const int32_t * llama_dataset_sequence(const struct llama_dataset * dataset, uint64_t index);
 
 /**
  * @brief Get a pointer to the tensor for a sequence.
@@ -132,7 +130,7 @@ const int32_t * sequence(const struct llama_dataset * dataset, uint64_t index);
  * @param index Index of the sequence
  * @return Pointer to the tensor, or NULL if dataset is NULL or index is out of bounds
  */
-struct ggml_tensor * sequence_tensor(const struct llama_dataset * dataset, uint64_t index);
+struct ggml_tensor * llama_dataset_sequence_tensor(const struct llama_dataset * dataset, uint64_t index);
 
 /**
  * @brief Free resources associated with a dataset.
@@ -152,7 +150,7 @@ void llama_dataset_free(struct llama_dataset * dataset);
  * @param key Metadata key
  * @return String value, or NULL if not found
  */
-const char * dataset_get_metadata_str(const struct llama_dataset * dataset, const char * key);
+const char * llama_dataset_get_metadata_str(const struct llama_dataset * dataset, const char * key);
 
 /**
  * @brief Get an integer metadata value from the dataset.
@@ -162,7 +160,7 @@ const char * dataset_get_metadata_str(const struct llama_dataset * dataset, cons
  * @param default_value Default value to return if key is not found
  * @return Integer value, or default_value if not found
  */
-int64_t dataset_get_metadata_int(const struct llama_dataset * dataset, const char * key, int64_t default_value);
+int64_t llama_dataset_get_metadata_int(const struct llama_dataset * dataset, const char * key, int64_t default_value);
 
 /**
  * @brief Get a float metadata value from the dataset.
@@ -172,7 +170,7 @@ int64_t dataset_get_metadata_int(const struct llama_dataset * dataset, const cha
  * @param default_value Default value to return if key is not found
  * @return Float value, or default_value if not found
  */
-float dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value);
+float llama_dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value);
 
 //
 // Error handling functions
@@ -219,44 +217,25 @@ const char * llama_dataset_error_code_to_string(enum dataset_error code);
  */
 void llama_dataset_clear_error(void);
 
-//
-// Legacy compatibility functions (for existing code)
-//
 
 /**
- * @brief Load a dataset from a GGUF file (legacy function).
+ * @brief GGUF dataset loader implementation.
+ *
+ * This header contains functions for loading GGUF datasets.
+ */
+
+/**
+ * @brief Load a dataset from a GGUF file with streaming option.
+ *
+ * This function loads a dataset from a GGUF file, with an option to use streaming mode.
+ * In streaming mode, tensor data is not loaded into memory until requested, which can
+ * save memory for large datasets.
  *
  * @param path Path to the GGUF file
  * @param streaming Whether to use streaming mode
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * llama_dataset_load_gguf(const char * path, bool streaming);
-
-/**
- * @brief Load a dataset from a Parquet file (legacy function).
- *
- * @param path Path to the Parquet file
- * @param streaming Whether to use streaming mode
- * @return Pointer to the dataset, or NULL on error
- */
-struct llama_dataset * llama_dataset_load_parquet(const char * path, bool streaming);
-
-/**
- * @brief Save a dataset to a GGUF file (legacy function).
- *
- * @param dataset Dataset to save
- * @param path Path to the output file
- * @return true on success, false on error
- */
-bool llama_dataset_save_gguf(struct llama_dataset * dataset, const char * path);
-
-/**
- * @brief Get the number of sequences in the dataset (legacy function).
- *
- * @param dataset Dataset to query
- * @return Number of sequences, or 0 if dataset is NULL
- */
-uint64_t llama_dataset_get_sequence_count(const struct llama_dataset * dataset);
+struct llama_dataset * llama_dataset_load_gguf(const common_params * common_params);
 
 /**
  * @brief Get the length of a sequence in the dataset (legacy function).
@@ -265,16 +244,7 @@ uint64_t llama_dataset_get_sequence_count(const struct llama_dataset * dataset);
  * @param index Index of the sequence
  * @return Length of the sequence, or 0 if dataset is NULL or index is out of bounds
  */
-int32_t llama_dataset_get_sequence_length(const struct llama_dataset * dataset, uint64_t index);
-
-/**
- * @brief Get a pointer to the tokens in a sequence (legacy function).
- *
- * @param dataset Dataset to query
- * @param index Index of the sequence
- * @return Pointer to the tokens, or NULL if dataset is NULL or index is out of bounds
- */
-const llama_token * llama_dataset_get_sequence(const struct llama_dataset * dataset, uint64_t index);
+int32_t llama_dataset_sequence_length(const struct llama_dataset * dataset, uint64_t index);
 
 /**
  * @brief Check if streaming is supported for a dataset type and file.
@@ -347,118 +317,6 @@ bool llama_dataset_get_streaming_stats(
     double * hit_ratio,
     size_t * memory_usage_bytes,
     size_t * entry_count);
-
 #ifdef __cplusplus
 }
-
-/**
- * @brief C++ wrapper class for RAII and STL compatibility.
- *
- * This class provides a C++ interface to the dataset API with RAII semantics.
- */
-#include <memory>
-#include <string>
-#include <vector>
-
-class Dataset {
-private:
-    struct llama_dataset * dataset_;
-
-public:
-    // Constructor and destructor
-    explicit Dataset(struct llama_dataset * dataset) : dataset_(dataset) {}
-    ~Dataset() {
-        if (dataset_) {
-            llama_dataset_free(dataset_);
-        }
-    }
-
-    // Move semantics
-    Dataset(Dataset&& other) noexcept : dataset_(other.dataset_) {
-        other.dataset_ = nullptr;
-    }
-
-    Dataset& operator=(Dataset&& other) noexcept {
-        if (this != &other) {
-            if (dataset_) {
-                llama_dataset_free(dataset_);
-            }
-            dataset_ = other.dataset_;
-            other.dataset_ = nullptr;
-        }
-        return *this;
-    }
-
-    // Delete copy constructor and assignment
-    Dataset(const Dataset&) = delete;
-    Dataset& operator=(const Dataset&) = delete;
-
-    // Static factory methods
-    static std::unique_ptr<Dataset> FromGGUF(const std::string& path) {
-        auto* dataset = from_gguf(path.c_str());
-        return dataset ? std::make_unique<Dataset>(dataset) : nullptr;
-    }
-
-    static std::unique_ptr<Dataset> FromText(const std::string& path, llama_model* model) {
-        auto* dataset = from_txt(path.c_str(), model);
-        return dataset ? std::make_unique<Dataset>(dataset) : nullptr;
-    }
-
-    static std::unique_ptr<Dataset> FromParquet(const std::string& path) {
-        auto* dataset = from_parquet(path.c_str());
-        return dataset ? std::make_unique<Dataset>(dataset) : nullptr;
-    }
-
-    // Access methods
-    uint64_t GetSequenceCount() const {
-        return dataset_ ? n_sequences(dataset_) : 0;
-    }
-
-    int32_t GetSequenceLength(uint64_t index) const {
-        return dataset_ ? sequence_length(dataset_, index) : 0;
-    }
-
-    std::vector<int32_t> GetSequence(uint64_t index) const {
-        if (!dataset_) return {};
-
-        const int32_t* tokens = sequence(dataset_, index);
-        int32_t length = sequence_length(dataset_, index);
-
-        if (!tokens || length <= 0) return {};
-
-        return std::vector<int32_t>(tokens, tokens + length);
-    }
-
-    // Conversion
-    void ToGGUF(const std::string& path) const {
-        if (dataset_) {
-            to_gguf(dataset_, path.c_str());
-        }
-    }
-
-    // Metadata access
-    std::string GetMetadataStr(const std::string& key) const {
-        if (!dataset_) return "";
-        const char* value = dataset_get_metadata_str(dataset_, key.c_str());
-        return value ? std::string(value) : std::string();
-    }
-
-    int64_t GetMetadataInt(const std::string& key, int64_t default_value = 0) const {
-        return dataset_ ? dataset_get_metadata_int(dataset_, key.c_str(), default_value) : default_value;
-    }
-
-    float GetMetadataFloat(const std::string& key, float default_value = 0.0f) const {
-        return dataset_ ? dataset_get_metadata_float(dataset_, key.c_str(), default_value) : default_value;
-    }
-
-    // Validity check
-    bool IsValid() const {
-        return dataset_ != nullptr;
-    }
-
-    // Access to underlying C structure (for advanced use)
-    struct llama_dataset * GetCDataset() const {
-        return dataset_;
-    }
-};
-#endif // __cplusplus
+#endif

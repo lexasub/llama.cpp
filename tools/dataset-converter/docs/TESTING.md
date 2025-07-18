@@ -62,7 +62,7 @@ ctest -R "test-streaming"
 ctest -R "test-integration"
 
 # Run multiple categories
-ctest -R "test-dataset|test-streaming|test-integration"
+ctest -R "_unit|_streaming|_integration"
 ```
 
 ### Running Tests with Verbose Output

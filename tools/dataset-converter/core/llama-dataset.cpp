@@ -2,53 +2,35 @@
 
 #include <cinttypes>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
-#include <vector>
 
-#include "../../common/log.h"
-#include "../../ggml/include/ggml.h"
-#include "../../ggml/include/gguf.h"
-#include "../../src/llama-impl.h"
+#include "common.h"
+#include "ggml/include/ggml.h"
+#include "ggml/include/gguf.h"
 #include "llama-dataset-gguf-utils.h"
-#include "llama-dataset-gguf.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-parquet.h"
 #include "llama-dataset-text.h"
 #include "llama-dataset-utils.h"
+#include "src/llama-impl.h"
 #include "streaming-optimization-manager.h"
 
 // Factory functions - simple implementations as wrappers
-struct llama_dataset * from_gguf(const char * path) {
-    return llama_dataset_load_gguf(path, false);
+struct llama_dataset * llama_dataset_from_gguf(const common_params * params) {
+    return llama_dataset_load_gguf(params);
 }
 
-struct llama_dataset * from_txt(const char * path, struct llama_model * model) {
-    // Use the implementation from llama-dataset-text.cpp
-    return llama_dataset_load_text_internal(path, model, false);
+struct llama_dataset * llama_dataset_from_txt(const common_params * params, struct llama_model * model) {
+    return llama_dataset_load_text_internal(params, model);
 }
 
-struct llama_dataset * from_parquet(const char * path) {
-    return llama_dataset_load_parquet_internal(path, false);
+#ifdef LLAMA_DATASET_PARQUET_SUPPORT
+struct llama_dataset * llama_dataset_from_parquet(const common_params * params) {
+    return llama_dataset_load_parquet_internal(params);
 }
-
-struct llama_dataset * llama_dataset_load_parquet(const char * path, bool streaming) {
-    return llama_dataset_load_parquet_internal(path, streaming);
-}
-
-bool llama_dataset_save_gguf(struct llama_dataset * dataset, const char * path) {
-    if (!dataset || !path) {
-        set_error("Invalid parameters for GGUF save");
-        return false;
-    }
-
-    to_gguf(dataset, path);
-    return !llama_dataset_has_error();
-}
-
-// Data access functions
+#endif
 
 /**
  * @brief Get the number of sequences in the dataset.
@@ -59,7 +41,7 @@ bool llama_dataset_save_gguf(struct llama_dataset * dataset, const char * path) 
  * @param dataset Dataset to query
  * @return Number of sequences, or 0 if dataset is NULL
  */
-uint64_t n_sequences(const struct llama_dataset * dataset) {
+uint64_t llama_dataset_n_sequences(const struct llama_dataset * dataset) {
     if (!dataset) {
         return 0;
     }
@@ -71,7 +53,7 @@ uint64_t n_sequences(const struct llama_dataset * dataset) {
 
     // If not cached, try to get from metadata
     if (dataset->ctx) {
-        int32_t key_idx = gguf_find_key(dataset->ctx, DATASET_SEQUENCE_COUNT);
+        int32_t key_idx = gguf_find_key(dataset->ctx, TRAINING_SEQUENCE_COUNT);
         if (key_idx >= 0) {
             enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
             if (type == GGUF_TYPE_INT32 || type == GGUF_TYPE_INT64) {
@@ -86,48 +68,8 @@ uint64_t n_sequences(const struct llama_dataset * dataset) {
     return 0;
 }
 
-// sequence_length is implemented in llama-dataset-sequence.cpp
-
-// sequence is implemented in llama-dataset-sequence.cpp
-
-// Legacy compatibility functions
-
-/**
- * @brief Get the number of sequences in the dataset (legacy function).
- *
- * @param dataset Dataset to query
- * @return Number of sequences, or 0 if dataset is NULL
- */
-uint64_t llama_dataset_get_sequence_count(const struct llama_dataset * dataset) {
-    return n_sequences(dataset);
-}
-
-/**
- * @brief Get the length of a sequence in the dataset (legacy function).
- *
- * @param dataset Dataset to query
- * @param index Index of the sequence
- * @return Length of the sequence, or 0 if dataset is NULL or index is out of bounds
- */
-int32_t llama_dataset_get_sequence_length(const struct llama_dataset * dataset, uint64_t index) {
-    return sequence_length(dataset, index);
-}
-
-/**
- * @brief Get a pointer to the tokens in a sequence (legacy function).
- *
- * @param dataset Dataset to query
- * @param index Index of the sequence
- * @return Pointer to the tokens, or NULL if dataset is NULL or index is out of bounds
- */
-const llama_token * llama_dataset_get_sequence(const struct llama_dataset * dataset, uint64_t index) {
-    return (const llama_token *)sequence(dataset, index);
-}
-
-// sequence_tensor is implemented in llama-dataset-sequence.cpp
-
 // Metadata access functions
-const char * dataset_get_metadata_str(const struct llama_dataset * dataset, const char * key) {
+const char * llama_dataset_get_metadata_str(const struct llama_dataset * dataset, const char * key) {
     if (!dataset || !dataset->ctx || !key) {
         return nullptr;
     }
@@ -138,14 +80,10 @@ const char * dataset_get_metadata_str(const struct llama_dataset * dataset, cons
     }
 
     enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    if (type != GGUF_TYPE_STRING) {
-        return nullptr;
-    }
-
-    return gguf_get_val_str(dataset->ctx, key_idx);
+    return type == GGUF_TYPE_STRING ? gguf_get_val_str(dataset->ctx, key_idx) : nullptr;
 }
 
-int64_t dataset_get_metadata_int(const struct llama_dataset * dataset, const char * key, int64_t default_value) {
+int64_t llama_dataset_get_metadata_int(const struct llama_dataset * dataset, const char * key, int64_t default_value) {
     if (!dataset || !dataset->ctx || !key) {
         return default_value;
     }
@@ -156,14 +94,10 @@ int64_t dataset_get_metadata_int(const struct llama_dataset * dataset, const cha
     }
 
     enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    if (type != GGUF_TYPE_INT32 && type != GGUF_TYPE_INT64) {
-        return default_value;
-    }
-
-    return gguf_get_val_i64(dataset->ctx, key_idx);
+    return type == GGUF_TYPE_INT32 || type == GGUF_TYPE_INT64 ? gguf_get_val_i64(dataset->ctx, key_idx) : default_value;
 }
 
-float dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value) {
+float llama_dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value) {
     if (!dataset || !dataset->ctx || !key) {
         return default_value;
     }
@@ -174,17 +108,13 @@ float dataset_get_metadata_float(const struct llama_dataset * dataset, const cha
     }
 
     enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    if (type != GGUF_TYPE_FLOAT32) {
-        return default_value;
-    }
-
-    return gguf_get_val_f32(dataset->ctx, key_idx);
+    return type == GGUF_TYPE_FLOAT32 ? gguf_get_val_f32(dataset->ctx, key_idx) : default_value;
 }
 
 // Conversion utility
-void to_gguf(struct llama_dataset * dataset, const char * path) {
+void llama_dataset_to_gguf(struct llama_dataset * dataset, const char * path) {
     if (!dataset || !path) {
-        set_error("Invalid parameters for GGUF conversion");
+        llama_dataset_set_error("Invalid parameters for GGUF conversion\n");
         return;
     }
 
@@ -192,15 +122,14 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
     if (dataset->type == DATASET_GGUF && dataset->ctx) {
         // If the dataset is in streaming mode, we need to ensure all tensors are loaded
         if (dataset->streaming) {
-            LLAMA_LOG_INFO("Converting streaming GGUF dataset to file: %s", path);
+            LLAMA_LOG_INFO("Converting streaming GGUF dataset to file: %s\n", path);
 
             // For streaming datasets, we need to load all tensor data
-            uint64_t n_seq = n_sequences(dataset);
+            uint64_t n_seq = llama_dataset_n_sequences(dataset);
             for (uint64_t i = 0; i < n_seq; i++) {
                 // This will trigger loading the tensor data if not already loaded
-                const int32_t * tokens = sequence(dataset, i);
-                if (!tokens) {
-                    set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to load tensor data for streaming conversion");
+                if (llama_dataset_sequence(dataset, i) == nullptr) {
+                    llama_dataset_set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to load tensor data for streaming conversion");
                     return;
                 }
             }
@@ -209,7 +138,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
         // Write GGUF file manually since we need to handle streaming data properly
         FILE* file = fopen(path, "wb");
         if (!file) {
-            set_error_with_code(DATASET_ERROR_FILE_NOT_FOUND, "Failed to open output file for writing");
+            llama_dataset_set_error_with_code(DATASET_ERROR_FILE_NOT_FOUND, "Failed to open output file for writing");
             return;
         }
 
@@ -218,7 +147,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
         void* meta_data = malloc(meta_size);
         if (!meta_data) {
             fclose(file);
-            set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate memory for GGUF metadata");
+            llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate memory for GGUF metadata");
             return;
         }
 
@@ -227,7 +156,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
         if (fwrite(meta_data, 1, meta_size, file) != meta_size) {
             free(meta_data);
             fclose(file);
-            set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write GGUF metadata");
+            llama_dataset_set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write GGUF metadata");
             return;
         }
         free(meta_data);
@@ -252,20 +181,20 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
 
             if (!tensor_data) {
                 fclose(file);
-                set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Tensor data not available for writing");
+                llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Tensor data not available for writing");
                 return;
             }
 
             if (tensor_size == 0) {
                 fclose(file);
-                set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Invalid tensor size for writing");
+                llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Invalid tensor size for writing");
                 return;
             }
 
             // Write tensor data with proper alignment
             if (fwrite(tensor_data, 1, tensor_size, file) != tensor_size) {
                 fclose(file);
-                set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write tensor data");
+                llama_dataset_set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write tensor data");
                 return;
             }
 
@@ -275,25 +204,24 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
                 char zero_padding[32] = {0};
                 if (fwrite(zero_padding, 1, padding, file) != padding) {
                     fclose(file);
-                    set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write tensor padding");
+                    llama_dataset_set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write tensor padding");
                     return;
                 }
             }
         }
 
         fclose(file);
-        LLAMA_LOG_INFO("Successfully wrote GGUF dataset to %s", path);
+        LLAMA_LOG_INFO("Successfully wrote GGUF dataset to %s\n", path);
         return;
     }
 
     // For other formats (TEXT, PARQUET), we need to create a new GGUF file
-    LLAMA_LOG_INFO("Converting %s dataset to GGUF file: %s\n",
-                  dataset->type == DATASET_TEXT ? "TEXT" : "PARQUET", path);
+    LLAMA_LOG_INFO("Converting %s dataset to GGUF file: %s\n", dataset->type == DATASET_TEXT ? "TEXT" : "PARQUET", path);
 
     // Create a new GGUF context
     struct gguf_context * new_ctx = gguf_init_empty();
     if (!new_ctx) {
-        set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGUF context for conversion");
+        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGUF context for conversion");
         return;
     }
 
@@ -335,62 +263,69 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
     }
 
     // Add or update standard metadata
-    gguf_set_val_str(new_ctx, DATASET_SOURCE_FORMAT,
-                    dataset->type == DATASET_TEXT ? "text" :
-                    dataset->type == DATASET_PARQUET ? "parquet" : "gguf");
+    gguf_set_val_str(new_ctx, TRAINING_FORMAT_SOURCE, dataset->type == DATASET_TEXT ? "text" : dataset->type == DATASET_PARQUET ? "parquet" : "gguf");
 
     // Add creation timestamp
-    time_t now = time(NULL);
+    time_t now = time(nullptr);
     char timestamp[32];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    gguf_set_val_str(new_ctx, DATASET_CREATION_TIME, timestamp);
+    gguf_set_val_str(new_ctx, TRAINING_CREATION_TIME, timestamp);
 
     // Set sequence count
-    uint64_t seq_count = n_sequences(dataset);
-    gguf_set_val_i32(new_ctx, DATASET_SEQUENCE_COUNT, (int32_t)seq_count);
+    uint64_t seq_count = llama_dataset_n_sequences(dataset);
+    gguf_set_val_i32(new_ctx, TRAINING_SEQUENCE_COUNT, static_cast<int32_t>(seq_count));
 
     // Find maximum sequence length
     int32_t max_length = 0;
     for (uint64_t i = 0; i < seq_count; i++) {
-        int32_t len = sequence_length(dataset, i);
+        int32_t len = llama_dataset_sequence_length(dataset, i);
         if (len > max_length) {
             max_length = len;
         }
     }
-    gguf_set_val_u32(new_ctx, DATASET_MAX_LENGTH, (uint32_t)max_length);
+    gguf_set_val_u32(new_ctx, TRAINING_MAX_LENGTH, static_cast<uint32_t>(max_length));
 
     // Add additional useful metadata
-    gguf_set_val_str(new_ctx, "dataset.version", "1.0");
-    gguf_set_val_str(new_ctx, "dataset.format", "llama-dataset");
+    gguf_set_val_i16(new_ctx, TRAINING_FORMAT_VERSION, 1000);
+    gguf_set_val_str(new_ctx, TRAINING_DATASET_NAME, "llama-dataset");
+    //TODO fill other
+    /*
+     *training.dataset.source: string (optional) - URL or description of the data source.
+     *training.tokenizer.gguf.model: string - Tokenizer model name (llama, gpt2, etc.).
+     *training.tokenizer.gguf.vocab: array[string] - Tokenizer dictionary.
+     *training.tokenizer.gguf.merges: array[string] - Tokenizer merges (for BPE).
+     *training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture.
+     */
+
 
     // Add total token count
     uint64_t total_tokens = 0;
     for (uint64_t i = 0; i < seq_count; i++) {
-        total_tokens += sequence_length(dataset, i);
+        total_tokens += llama_dataset_sequence_length(dataset, i);
     }
-    gguf_set_val_u32(new_ctx, "dataset.total_tokens", (uint32_t)total_tokens);
+    gguf_set_val_u64(new_ctx, TRAINING_SEQUENCE_COUNT, static_cast<uint32_t>(total_tokens));
 
     // Create GGML context for tensor data
     struct ggml_init_params ggml_params = {
         /*.mem_size   =*/ 128ull*1024ull*1024ull,
-        /*.mem_buffer =*/ NULL,
+        /*.mem_buffer =*/nullptr,
         /*.no_alloc   =*/ false,
     };
     struct ggml_context* ggml_ctx = ggml_init(ggml_params);
     if (!ggml_ctx) {
         gguf_free(new_ctx);
-        set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGML context for conversion");
+        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGML context for conversion");
         return;
     }
 
     // Add all sequences as tensors
     for (uint64_t i = 0; i < seq_count; i++) {
         // Get sequence data
-        const int32_t * tokens = sequence(dataset, i);
-        int32_t length = sequence_length(dataset, i);
+        const int32_t * tokens = llama_dataset_sequence(dataset, i);
+        int32_t length = llama_dataset_sequence_length(dataset, i);
 
         if (!tokens || length <= 0) {
-            LLAMA_LOG_WARN("Skipping invalid sequence at index %zu", i);
+            LLAMA_LOG_WARN("Skipping invalid sequence at index %zu\n", i);
             continue;
         }
 
@@ -399,7 +334,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
         snprintf(tensor_name, sizeof(tensor_name), "seq_%05" PRIu64, i);
 
         // Create tensor in GGML context
-        int64_t ne[1] = { (int64_t)length };
+        int64_t ne[1] = { static_cast<int64_t>(length) };
         struct ggml_tensor* tensor = ggml_new_tensor(ggml_ctx, GGML_TYPE_I32, 1, ne);
         ggml_set_name(tensor, tensor_name);
 
@@ -414,7 +349,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
     if (!gguf_write_to_file(new_ctx, path, false)) {
         ggml_free(ggml_ctx);
         gguf_free(new_ctx);
-        set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write GGUF file");
+        llama_dataset_set_error_with_code(DATASET_ERROR_IO_ERROR, "Failed to write GGUF file");
         return;
     }
 
@@ -422,7 +357,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
     ggml_free(ggml_ctx);
     gguf_free(new_ctx);
 
-    LLAMA_LOG_INFO("Successfully converted dataset to GGUF file: %s", path);
+    LLAMA_LOG_INFO("Successfully converted dataset to GGUF file: %s\n", path);
 }
 
 // Cleanup
@@ -433,13 +368,13 @@ void llama_dataset_free(struct llama_dataset * dataset) {
 
     // Free streaming optimization manager if it exists
     if (dataset->optimization_manager) {
-        delete static_cast<StreamingOptimizationManager*>(dataset->optimization_manager);
+        delete static_cast<llama_dataset_stream_optimization_manager *>(dataset->optimization_manager);
         dataset->optimization_manager = nullptr;
     }
 
     // Free streaming cache if in streaming mode
     if (dataset->streaming && dataset->streaming_cache) {
-        delete static_cast<StreamingCache*>(dataset->streaming_cache);
+        delete static_cast<llama_dataset_streaming_cache *>(dataset->streaming_cache);
         dataset->streaming_cache = nullptr;
     }
 
@@ -447,7 +382,7 @@ void llama_dataset_free(struct llama_dataset * dataset) {
     if (dataset->cached_tensors) {
         // In streaming mode, we need to free the tensor data that we allocated
         if (dataset->streaming) {
-            uint64_t n_seq = n_sequences(dataset);
+            uint64_t n_seq = llama_dataset_n_sequences(dataset);
             for (uint64_t i = 0; i < n_seq; i++) {
                 if (dataset->cached_tensors[i]) {
                     // In streaming mode, tensor data is now managed by the streaming cache

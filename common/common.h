@@ -84,6 +84,7 @@ enum llama_example {
     LLAMA_EXAMPLE_TTS,
     LLAMA_EXAMPLE_DIFFUSION,
     LLAMA_EXAMPLE_FINETUNE,
+    LLAMA_EXAMPLE_DATASET,
 
     LLAMA_EXAMPLE_COUNT,
 };
@@ -471,6 +472,7 @@ struct common_params {
     bool do_preview = false;
     bool pre_tokenized = false;
     std::string dataset_column = "data";
+    bool dataset_streaming = false;
 };
 
 // call once at the start of a program if it uses libcommon

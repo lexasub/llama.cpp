@@ -28,29 +28,20 @@ The Dataset Converter addresses this challenge by:
 The tool is run from the command line. The basic syntax is as follows:
 
 ```bash
-./dataset_converter [options] <input_file> <output_file>
+./dataset_converter [options] --in-file <input_file> -o <output_file> --streaming
 ```
-
-**Options:**
-
-| Flag                | Description                                                  |
-| ------------------- | ------------------------------------------------------------ |
-| `-h`, `--help`      | Show the help message and exit.                              |
-| `--model MODEL`     | Path to the `llama.cpp` model for tokenization (required for text input). |
-| `--streaming`       | Use streaming mode for large datasets.                       |
-
 ### Examples
 
 **Convert a text file to GGUF:**
 
 ```bash
-./dataset_converter --model ./models/7B/ggml-model-f16.gguf --streaming input.txt output.gguf
+./dataset_converter --model ./models/7B/ggml-model-f16.gguf --streaming --in-file input.txt -o output.gguf
 ```
 
 **Convert a Parquet file to GGUF:**
 
 ```bash
-./dataset_converter --streaming input.parquet output.gguf
+./dataset_converter --streaming --in-file input.parquet -o output.gguf --dataset-column tokens
 ```
 
 ## 5. Directory Structure
@@ -115,13 +106,6 @@ struct llama_dataset * llama_dataset_load_gguf(const char * path, bool streaming
 struct llama_dataset * llama_dataset_load_text(const char * path, struct llama_model * model, bool streaming);
 struct llama_dataset * llama_dataset_load_parquet(const char * path, bool streaming);
 
-// Legacy access functions
-uint64_t llama_dataset_get_sequence_count(const struct llama_dataset * dataset);
-int32_t llama_dataset_get_sequence_length(const struct llama_dataset * dataset, uint64_t index);
-const llama_token * llama_dataset_get_sequence(const struct llama_dataset * dataset, uint64_t index);
-
-// Legacy conversion function
-bool llama_dataset_save_gguf(struct llama_dataset * dataset, const char * path);
 ```
 
 ## 7. Dependencies
@@ -157,3 +141,38 @@ For developers working on this codebase:
 - See `docs/REMOVED_FILES.md` for information about the previous implementation.
 - The new interface is designed to be simpler and more consistent while maintaining backward compatibility.
 - Streaming optimization features significantly improve performance for large datasets.
+
+Metadata:
+```
+training.format.version: int16 (e.g. 1000) - Specification version, in case of future changes.
+
+training.format.source: Source format (gguf, text, parquet)
+
+training.dataset.name: string (optional) - Dataset name (e.g. "OpenWebText-ru").
+
+training.dataset.description: string (optional) - Dataset description (e.g. "OpenWebText-ru").
+
+training.dataset.source: string (optional) - URL or description of the data source.
+
+training.file.creation_date: string (ISO 8601) - File creation date.
+
+training.tokenizer.gguf.model: string - Tokenizer model name (llama, gpt2, etc.).
+
+training.tokenizer.gguf.vocab: array[string] - Tokenizer dictionary.
+
+training.tokenizer.gguf.merges: array[string] - Tokenizer merges (for BPE).
+
+training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture.
+
+Note: Instead of storing the entire tokenizer, you could reference the model file, but embedding ensures that the data file is completely self-contained.
+
+training.sequence.count: uint64 - Total number of sequences in the file.
+```
+Tensors:
+```
+Naming: training.tensor.{index} (e.g. training.tensor.0, training.tensor.1, ...).
+
+Data type: GGML_TYPE_I32 (standard for tokens in llama.cpp).
+
+Shape: [sequence_length] - One-dimensional array. sequence_length will be different for each tensor.
+```

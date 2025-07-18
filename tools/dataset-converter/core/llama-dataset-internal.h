@@ -10,8 +10,8 @@
  */
 
 #include "llama-dataset.h"
-#include "../../ggml/include/gguf.h"
-#include "../../ggml/include/ggml.h"
+#include "ggml/include/gguf.h"
+#include "ggml/include/ggml.h"
 
 #ifdef __cplusplus
 #include "streaming-cache.h"
@@ -23,7 +23,7 @@ extern "C" {
  *
  * This structure contains all the necessary data for representing a dataset,
  * including the GGUF context, GGML context, and cached tensor pointers.
- * 
+ *
  * This structure is internal and should not be exposed to the public API.
  */
 struct llama_dataset {
@@ -35,8 +35,9 @@ struct llama_dataset {
     bool streaming;                         // Streaming mode flag
     void * format_data;                     // Format-specific state
 #ifdef __cplusplus
-    StreamingCache * streaming_cache;       // LRU cache for streaming data
+    llama_dataset_streaming_cache * streaming_cache;       // LRU cache for streaming data
     void * optimization_manager;            // Streaming optimization manager
+    std::string                             column;
 #else
     void * streaming_cache;                 // Opaque pointer for C compatibility
     void * optimization_manager;            // Opaque pointer for optimization manager

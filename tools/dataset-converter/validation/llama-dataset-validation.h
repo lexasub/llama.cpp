@@ -8,9 +8,9 @@
  * to detect corruption and ensure data integrity.
  */
 
-#include "llama-dataset.h"
-#include <stdbool.h>
 #include <stdint.h>
+
+#include "llama-dataset.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,7 +34,7 @@ struct validation_result {
  * @param result Validation result structure
  * @return true if file is valid, false if corrupted or invalid
  */
-bool validate_gguf_file(const char* path, struct validation_result* result);
+bool llama_dataset_validate_gguf_file(const char* path, struct validation_result* result);
 
 /**
  * @brief Validate Parquet file format and detect corruption.
@@ -43,7 +43,7 @@ bool validate_gguf_file(const char* path, struct validation_result* result);
  * @param result Validation result structure
  * @return true if file is valid, false if corrupted or invalid
  */
-bool validate_parquet_file(const char* path, struct validation_result* result);
+bool llama_dataset_validate_parquet_file(const char* path, struct validation_result* result);
 
 /**
  * @brief Validate text file format and detect issues.
@@ -52,7 +52,7 @@ bool validate_parquet_file(const char* path, struct validation_result* result);
  * @param result Validation result structure
  * @return true if file is valid, false if corrupted or invalid
  */
-bool validate_text_file(const char* path, struct validation_result* result);
+bool llama_dataset_validate_text_file(const char* path, struct validation_result* result);
 
 /**
  * @brief Validate dataset file based on extension or content.
@@ -61,7 +61,7 @@ bool validate_text_file(const char* path, struct validation_result* result);
  * @param result Validation result structure
  * @return true if file is valid, false if corrupted or invalid
  */
-bool validate_dataset_file(const char* path, struct validation_result* result);
+bool llama_dataset_validate_dataset_file(const char* path, struct validation_result* result);
 
 /**
  * @brief Check if a file appears to be corrupted based on basic checks.
@@ -69,7 +69,7 @@ bool validate_dataset_file(const char* path, struct validation_result* result);
  * @param path Path to the file
  * @return true if file appears corrupted, false otherwise
  */
-bool is_file_corrupted(const char* path);
+bool llama_dataset_is_file_corrupted(const char* path);
 
 /**
  * @brief Get a human-readable description of validation result.
@@ -77,7 +77,7 @@ bool is_file_corrupted(const char* path);
  * @param result Validation result structure
  * @return String description of the validation result
  */
-const char* validation_result_description(const struct validation_result* result);
+const char* llama_dataset_validation_result_description(const struct validation_result* result);
 
 #ifdef __cplusplus
 }

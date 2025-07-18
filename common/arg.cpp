@@ -1482,7 +1482,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params) {
             params.ctx_shift = false;
         }
-    ).set_examples({LLAMA_EXAMPLE_MAIN, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_PERPLEXITY}).set_env("LLAMA_ARG_NO_CONTEXT_SHIFT"));
+    ).set_examples({LLAMA_EXAMPLE_MAIN, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_DATASET}).set_env("LLAMA_ARG_NO_CONTEXT_SHIFT"));
     add_opt(common_arg(
         {"--chunks"}, "N",
         string_format("max number of chunks to process (default: %d, -1 = all)", params.n_chunks),
@@ -1551,7 +1551,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             }
             params.in_files.push_back(value);
         }
-    ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_DATASET}));
     add_opt(common_arg(
         {"-bf", "--binary-file"}, "FNAME",
         "binary file containing the prompt (default: none)",
@@ -2541,7 +2541,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             params.model.path = value;
         }
-    ).set_examples({LLAMA_EXAMPLE_COMMON, LLAMA_EXAMPLE_EXPORT_LORA}).set_env("LLAMA_ARG_MODEL"));
+    ).set_examples({LLAMA_EXAMPLE_COMMON, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_DATASET}).set_env("LLAMA_ARG_MODEL"));
     add_opt(common_arg(
         {"-mu", "--model-url"}, "MODEL_URL",
         "model download url (default: unused)",
@@ -2639,7 +2639,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
           params.out_file = value;
         }
-    ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_CVECTOR_GENERATOR, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_TTS, LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_CVECTOR_GENERATOR, LLAMA_EXAMPLE_EXPORT_LORA, LLAMA_EXAMPLE_TTS, LLAMA_EXAMPLE_FINETUNE, LLAMA_EXAMPLE_DATASET}));
     add_opt(common_arg(
         {"-ofreq", "--output-frequency"}, "N",
         string_format("output the imatrix every N iterations (default: %d)", params.n_out_freq),
@@ -3517,7 +3517,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & format) {
             params.dataset_format = format; //TODO ENUM CLASS
         }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     add_opt(common_arg(
         {"--max-seq-len"}, " ",
@@ -3525,7 +3525,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, int32_t max_seq_len) {
             params.max_seq_len = max_seq_len;
         }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     add_opt(common_arg(
         {"--pre-tokenized"},
@@ -3533,7 +3533,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params) {
             params.pre_tokenized = true;
         }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     add_opt(common_arg(
         {"--preview"},
@@ -3541,7 +3541,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params) {
             params.do_preview = true;
         }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     add_opt(common_arg(
         {"--dataset-column"}, "<name>",
@@ -3549,7 +3549,15 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string &dataset_column) {
             params.dataset_column = dataset_column;
         }
-    ).set_examples({LLAMA_EXAMPLE_FINETUNE}));
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
+
+    add_opt(common_arg(
+        {"--streaming"},
+        string_format("enable streaming dataset"),
+        [](common_params & params) {
+            params.dataset_streaming = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     return ctx_arg;
 }

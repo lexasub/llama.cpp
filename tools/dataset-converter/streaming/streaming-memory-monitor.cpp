@@ -8,10 +8,10 @@
 #include <string>
 #include <thread>
 
-#include "../../common/log.h"
+#include "common/log.h"
 #include "llama-impl.h"
 
-StreamingMemoryMonitor::StreamingMemoryMonitor(
+llama_dataset_streaming_memory_monitor::llama_dataset_streaming_memory_monitor(
     size_t interval_ms,
     double high_threshold,
     double low_threshold)
@@ -21,21 +21,20 @@ StreamingMemoryMonitor::StreamingMemoryMonitor(
       low_pressure_threshold(low_threshold) {
 }
 
-StreamingMemoryMonitor::~StreamingMemoryMonitor() {
+llama_dataset_streaming_memory_monitor::~llama_dataset_streaming_memory_monitor() {
     stop();
 }
 
-void StreamingMemoryMonitor::monitor_loop() {
-    LLAMA_LOG_DEBUG("Memory monitor thread started");
+void llama_dataset_streaming_memory_monitor::monitor_loop() {
+    LLAMA_LOG_DEBUG("Memory monitor thread started\n");
 
-    double last_pressure = 0.0;
     bool high_pressure_notified = false;
     bool low_pressure_notified = false;
 
     while (running) {
         // Sleep for the check interval
         {
-            std::unique_lock<std::mutex> lock(mutex);
+            std::unique_lock lock(mutex);
             cv.wait_for(lock, std::chrono::milliseconds(check_interval_ms),
                 [this] { return !running; });
 
@@ -54,27 +53,24 @@ void StreamingMemoryMonitor::monitor_loop() {
             }
             high_pressure_notified = true;
             low_pressure_notified = false;
-            LLAMA_LOG_DEBUG("High memory pressure detected: %.2f", pressure);
+            LLAMA_LOG_DEBUG("High memory pressure detected: %.2f\n", pressure);
         } else if (pressure <= low_pressure_threshold && !low_pressure_notified) {
             if (pressure_callback) {
                 pressure_callback(pressure);
             }
             high_pressure_notified = false;
             low_pressure_notified = true;
-            LLAMA_LOG_DEBUG("Low memory pressure detected: %.2f", pressure);
+            LLAMA_LOG_DEBUG("Low memory pressure detected: %.2f\n", pressure);
         }
-
-        last_pressure = pressure;
     }
 
     LLAMA_LOG_DEBUG("Memory monitor thread stopped");
 }
 
-double StreamingMemoryMonitor::get_memory_pressure() {
+double llama_dataset_streaming_memory_monitor::get_memory_pressure() {
     // Get process memory usage
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
-    size_t process_memory = usage.ru_maxrss * 1024; // Convert to bytes
 
     // Get system memory info from /proc/meminfo
     size_t total_memory = 0;
@@ -106,30 +102,30 @@ double StreamingMemoryMonitor::get_memory_pressure() {
     // Calculate memory pressure
     double pressure = 0.0;
     if (total_memory > 0) {
-        pressure = 1.0 - (double)available_memory / total_memory;
+        pressure = 1.0 - static_cast<double>(available_memory) / total_memory;
     }
 
     return pressure;
 }
 
-void StreamingMemoryMonitor::start() {
+void llama_dataset_streaming_memory_monitor::start() {
     if (running) {
         return;
     }
 
     running = true;
-    monitor_thread = std::thread(&StreamingMemoryMonitor::monitor_loop, this);
+    monitor_thread = std::thread(&llama_dataset_streaming_memory_monitor::monitor_loop, this);
 
     LLAMA_LOG_DEBUG("Started memory monitor with interval %zu ms", check_interval_ms);
 }
 
-void StreamingMemoryMonitor::stop() {
+void llama_dataset_streaming_memory_monitor::stop() {
     if (!running) {
         return;
     }
 
     {
-        std::lock_guard<std::mutex> lock(mutex);
+        std::lock_guard lock(mutex);
         running = false;
     }
 
@@ -141,29 +137,28 @@ void StreamingMemoryMonitor::stop() {
         monitor_thread.join();
     }
 
-    LLAMA_LOG_DEBUG("Stopped memory monitor");
+    LLAMA_LOG_DEBUG("Stopped memory monitor\n");
 }
 
-void StreamingMemoryMonitor::set_pressure_callback(MemoryPressureCallback callback) {
-    std::lock_guard<std::mutex> lock(mutex);
+void llama_dataset_streaming_memory_monitor::set_pressure_callback(MemoryPressureCallback callback) {
+    std::lock_guard lock(mutex);
     pressure_callback = callback;
 }
 
-void StreamingMemoryMonitor::set_check_interval(size_t interval_ms) {
-    std::lock_guard<std::mutex> lock(mutex);
+void llama_dataset_streaming_memory_monitor::set_check_interval(size_t interval_ms) {
+    std::lock_guard lock(mutex);
     check_interval_ms = interval_ms;
-    LLAMA_LOG_DEBUG("Set memory monitor check interval to %zu ms", check_interval_ms);
+    LLAMA_LOG_DEBUG("Set memory monitor check interval to %zu ms\n", check_interval_ms);
 }
 
-void StreamingMemoryMonitor::set_pressure_thresholds(double high_threshold, double low_threshold) {
+void llama_dataset_streaming_memory_monitor::set_pressure_thresholds(double high_threshold, double low_threshold) {
     std::lock_guard<std::mutex> lock(mutex);
     high_pressure_threshold = high_threshold;
     low_pressure_threshold = low_threshold;
-    LLAMA_LOG_DEBUG("Set memory monitor pressure thresholds to high=%.2f, low=%.2f",
-                   high_threshold, low_threshold);
+    LLAMA_LOG_DEBUG("Set memory monitor pressure thresholds to high=%.2f, low=%.2f\n", high_threshold, low_threshold);
 }
 
-StreamingMemoryMonitor::MemoryInfo StreamingMemoryMonitor::get_memory_info() const {
+llama_dataset_streaming_memory_monitor::MemoryInfo llama_dataset_streaming_memory_monitor::get_memory_info() const {
     MemoryInfo info;
     info.total_physical_memory = 0;
     info.available_physical_memory = 0;
@@ -201,7 +196,7 @@ StreamingMemoryMonitor::MemoryInfo StreamingMemoryMonitor::get_memory_info() con
 
     // Calculate memory pressure
     if (info.total_physical_memory > 0) {
-        info.memory_pressure = 1.0 - (double)info.available_physical_memory / info.total_physical_memory;
+        info.memory_pressure = 1.0 - static_cast<double>(info.available_physical_memory) / info.total_physical_memory;
     }
 
     return info;

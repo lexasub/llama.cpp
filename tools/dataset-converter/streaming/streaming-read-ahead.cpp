@@ -1,27 +1,27 @@
 #include "streaming-read-ahead.h"
 
-#include "../../common/log.h"
+#include "common/log.h"
 #include "llama-impl.h"
 
-StreamingReadAhead::StreamingReadAhead(size_t window, size_t max_queue)
+llama_dataset_streaming_read_ahead::llama_dataset_streaming_read_ahead(size_t window, size_t max_queue)
     : running(false),
       paused(false),
       window_size(window),
       max_queue_size(max_queue) {
 }
 
-StreamingReadAhead::~StreamingReadAhead() {
+llama_dataset_streaming_read_ahead::~llama_dataset_streaming_read_ahead() {
     stop();
 }
 
-void StreamingReadAhead::worker_loop() {
+void llama_dataset_streaming_read_ahead::worker_loop() {
     LLAMA_LOG_DEBUG("Streaming read-ahead worker thread started");
 
     while (running) {
         uint64_t sequence_id = 0;
 
         {
-            std::unique_lock<std::mutex> lock(queue_mutex);
+            std::unique_lock lock(queue_mutex);
 
             // Wait until there's work to do or we're stopped
             cv.wait(lock, [this] {
@@ -48,40 +48,40 @@ void StreamingReadAhead::worker_loop() {
         if (prefetch_callback && sequence_id > 0) {
             try {
                 prefetch_callback(sequence_id);
-                LLAMA_LOG_DEBUG("Prefetched sequence %zu", sequence_id);
+                LLAMA_LOG_DEBUG("Prefetched sequence %zu\n", sequence_id);
             } catch (const std::exception& e) {
-                LLAMA_LOG_ERROR("Error prefetching sequence %zu: %s", sequence_id, e.what());
+                LLAMA_LOG_ERROR("Error prefetching sequence %zu: %s\n", sequence_id, e.what());
             }
         }
 
         // Mark as completed
         {
-            std::lock_guard<std::mutex> lock(queue_mutex);
+            std::lock_guard lock(queue_mutex);
             in_progress.erase(sequence_id);
         }
     }
 
-    LLAMA_LOG_DEBUG("Streaming read-ahead worker thread stopped");
+    LLAMA_LOG_DEBUG("Streaming read-ahead worker thread stopped\n");
 }
 
-void StreamingReadAhead::start() {
+void llama_dataset_streaming_read_ahead::start() {
     if (running) {
         return;
     }
 
     running = true;
-    worker_thread = std::thread(&StreamingReadAhead::worker_loop, this);
+    worker_thread = std::thread(&llama_dataset_streaming_read_ahead::worker_loop, this);
 
-    LLAMA_LOG_DEBUG("Started streaming read-ahead with window size %zu", window_size);
+    LLAMA_LOG_DEBUG("Started streaming read-ahead with window size %zu\n", window_size);
 }
 
-void StreamingReadAhead::stop() {
+void llama_dataset_streaming_read_ahead::stop() {
     if (!running) {
         return;
     }
 
     {
-        std::lock_guard<std::mutex> lock(queue_mutex);
+        std::lock_guard lock(queue_mutex);
         running = false;
 
         // Clear the queue
@@ -98,18 +98,18 @@ void StreamingReadAhead::stop() {
         worker_thread.join();
     }
 
-    LLAMA_LOG_DEBUG("Stopped streaming read-ahead");
+    LLAMA_LOG_DEBUG("Stopped streaming read-ahead\n");
 }
 
-void StreamingReadAhead::pause() {
-    std::lock_guard<std::mutex> lock(queue_mutex);
+void llama_dataset_streaming_read_ahead::pause() {
+    std::lock_guard lock(queue_mutex);
     paused = true;
     LLAMA_LOG_DEBUG("Paused streaming read-ahead");
 }
 
-void StreamingReadAhead::resume() {
+void llama_dataset_streaming_read_ahead::resume() {
     {
-        std::lock_guard<std::mutex> lock(queue_mutex);
+        std::lock_guard lock(queue_mutex);
         paused = false;
     }
 
@@ -117,13 +117,13 @@ void StreamingReadAhead::resume() {
     LLAMA_LOG_DEBUG("Resumed streaming read-ahead");
 }
 
-void StreamingReadAhead::set_prefetch_callback(PrefetchCallback callback) {
-    std::lock_guard<std::mutex> lock(queue_mutex);
+void llama_dataset_streaming_read_ahead::set_prefetch_callback(PrefetchCallback callback) {
+    std::lock_guard lock(queue_mutex);
     prefetch_callback = callback;
 }
 
-void StreamingReadAhead::prefetch(uint64_t sequence_id) {
-    std::lock_guard<std::mutex> lock(queue_mutex);
+void llama_dataset_streaming_read_ahead::prefetch(uint64_t sequence_id) {
+    std::lock_guard lock(queue_mutex);
 
     if (!running || paused) {
         return;
@@ -150,23 +150,23 @@ void StreamingReadAhead::prefetch(uint64_t sequence_id) {
     cv.notify_one();
 }
 
-void StreamingReadAhead::clear_queue() {
-    std::lock_guard<std::mutex> lock(queue_mutex);
+void llama_dataset_streaming_read_ahead::clear_queue() {
+    std::lock_guard lock(queue_mutex);
 
     // Clear the queue
     std::queue<uint64_t> empty;
     std::swap(prefetch_queue, empty);
 
-    LLAMA_LOG_DEBUG("Cleared streaming read-ahead queue");
+    LLAMA_LOG_DEBUG("Cleared streaming read-ahead queue\n");
 }
 
-void StreamingReadAhead::set_window_size(size_t window) {
-    std::lock_guard<std::mutex> lock(queue_mutex);
+void llama_dataset_streaming_read_ahead::set_window_size(size_t window) {
+    std::lock_guard lock(queue_mutex);
     window_size = window;
-    LLAMA_LOG_DEBUG("Set streaming read-ahead window size to %zu", window_size);
+    LLAMA_LOG_DEBUG("Set streaming read-ahead window size to %zu\n", window_size);
 }
 
-StreamingReadAhead::Status StreamingReadAhead::get_status() const {
+llama_dataset_streaming_read_ahead::Status llama_dataset_streaming_read_ahead::get_status() const {
     // Can't use lock_guard with const mutex in a const method
     // We'll create a copy of the status without locking
     // This is not thread-safe but acceptable for status reporting

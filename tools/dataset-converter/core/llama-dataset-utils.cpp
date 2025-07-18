@@ -6,7 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "../../common/log.h"
+#include "common.h"
+#include "common/log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 
@@ -18,7 +19,7 @@ static thread_local struct {
 } g_error_state = {DATASET_SUCCESS, {0}, false};
 
 // Error handling functions
-void set_error_with_code(enum dataset_error code, const char* msg) {
+void llama_dataset_set_error_with_code(enum dataset_error code, const char* msg) {
     if (!msg) {
         msg = "Unknown error (null message)";
     }
@@ -39,11 +40,11 @@ void set_error_with_code(enum dataset_error code, const char* msg) {
 
     g_error_state.has_error = true;
 
-    LLAMA_LOG_ERROR("%s", g_error_state.message);
+    LLAMA_LOG_ERROR("%s\n", g_error_state.message);
 }
 
-void set_error(const char* msg) {
-    set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, msg);
+void llama_dataset_set_error(const char* msg) {
+    llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, msg);
 }
 
 const char* llama_dataset_get_error(void) {
@@ -87,17 +88,16 @@ const char* llama_dataset_error_code_to_string(enum dataset_error code) {
     }
 }
 
-void llama_dataset_clear_error(void) {
+void llama_dataset_clear_error() {
     g_error_state.code = DATASET_SUCCESS;
     g_error_state.message[0] = '\0';
     g_error_state.has_error = false;
 }
 
-// Dataset allocation and initialization
-struct llama_dataset* dataset_alloc(enum dataset_type type, bool streaming) {
-    struct llama_dataset* dataset = (struct llama_dataset*)malloc(sizeof(struct llama_dataset));
+struct llama_dataset* llama_dataset_alloc(enum dataset_type type, bool streaming) {
+    struct llama_dataset* dataset = static_cast<struct llama_dataset *>(malloc(sizeof(struct llama_dataset)));
     if (!dataset) {
-        set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate dataset structure");
+        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate dataset structure");
         return nullptr;
     }
 
@@ -110,9 +110,9 @@ struct llama_dataset* dataset_alloc(enum dataset_type type, bool streaming) {
 
     // Initialize streaming cache if in streaming mode
     if (streaming) {
-        dataset->streaming_cache = new StreamingCache(64 * 1024 * 1024); // 64MB default
+        dataset->streaming_cache = new llama_dataset_streaming_cache(64 * 1024 * 1024); // 64MB default
         if (!dataset->streaming_cache) {
-            set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming cache");
+            llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming cache");
             free(dataset);
             return nullptr;
         }
@@ -124,14 +124,13 @@ struct llama_dataset* dataset_alloc(enum dataset_type type, bool streaming) {
     return dataset;
 }
 
-struct llama_dataset* dataset_create(void) {
-    return dataset_alloc(DATASET_GGUF, false);
+struct llama_dataset* llama_dataset_create(void) {
+    return llama_dataset_alloc(DATASET_GGUF, false);
 }
 
-// Cache tensor pointers for fast access
-bool dataset_cache_tensors(struct llama_dataset* dataset) {
+bool llama_dataset_cache_tensors(struct llama_dataset* dataset) {
     if (!dataset || !dataset->ctx) {
-        set_error("Invalid dataset for tensor caching");
+        llama_dataset_set_error("Invalid dataset for tensor caching");
         return false;
     }
 
@@ -145,9 +144,9 @@ bool dataset_cache_tensors(struct llama_dataset* dataset) {
     }
 
     // Allocate tensor pointer array
-    dataset->cached_tensors = (struct ggml_tensor**)malloc(n_tensors * sizeof(struct ggml_tensor*));
+    dataset->cached_tensors = static_cast<struct ggml_tensor **>(malloc(n_tensors * sizeof(struct ggml_tensor *)));
     if (!dataset->cached_tensors) {
-        set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor cache");
+        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor cache");
         return false;
     }
 
@@ -177,9 +176,9 @@ bool dataset_cache_tensors(struct llama_dataset* dataset) {
             if (name) {
                 // Create a minimal tensor structure for streaming mode
                 // This will be used to store streaming data when loaded
-                dataset->cached_tensors[i] = (struct ggml_tensor*)calloc(1, sizeof(struct ggml_tensor));
+                dataset->cached_tensors[i] = static_cast<struct ggml_tensor *>(calloc(1, sizeof(struct ggml_tensor)));
                 if (!dataset->cached_tensors[i]) {
-                    set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming tensor placeholder");
+                    llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming tensor placeholder");
                     return false;
                 }
                 // Initialize tensor metadata but not data (data will be loaded on demand)
@@ -192,41 +191,41 @@ bool dataset_cache_tensors(struct llama_dataset* dataset) {
 }
 
 // Compare two datasets for equality
-bool datasets_equal(struct llama_dataset* dataset1, struct llama_dataset* dataset2) {
+bool llama_dataset_equal(struct llama_dataset* dataset1, struct llama_dataset* dataset2) {
     if (!dataset1 || !dataset2) {
         return false;
     }
 
     // Compare sequence counts
-    uint64_t count1 = n_sequences(dataset1);
-    uint64_t count2 = n_sequences(dataset2);
+    uint64_t count1 = llama_dataset_n_sequences(dataset1);
+    uint64_t count2 = llama_dataset_n_sequences(dataset2);
 
     if (count1 != count2) {
-        LLAMA_LOG_WARN("Datasets have different sequence counts: %zu vs %zu", count1, count2);
+        LLAMA_LOG_WARN("Datasets have different sequence counts: %zu vs %zu\n", count1, count2);
         return false;
     }
 
     // Compare each sequence
     for (uint64_t i = 0; i < count1; i++) {
-        int32_t len1 = sequence_length(dataset1, i);
-        int32_t len2 = sequence_length(dataset2, i);
+        int32_t len1 = llama_dataset_sequence_length(dataset1, i);
+        int32_t len2 = llama_dataset_sequence_length(dataset2, i);
 
         if (len1 != len2) {
-            LLAMA_LOG_WARN("Sequence %zu has different lengths: %d vs %d", i, len1, len2);
+            LLAMA_LOG_WARN("Sequence %zu has different lengths: %d vs %d\n", i, len1, len2);
             return false;
         }
 
-        const int32_t* seq1 = sequence(dataset1, i);
-        const int32_t* seq2 = sequence(dataset2, i);
+        const int32_t* seq1 = llama_dataset_sequence(dataset1, i);
+        const int32_t* seq2 = llama_dataset_sequence(dataset2, i);
 
         if (!seq1 || !seq2) {
-            LLAMA_LOG_WARN("Sequence %zu data is null", i);
+            LLAMA_LOG_WARN("Sequence %zu data is null\n", i);
             return false;
         }
 
         for (int32_t j = 0; j < len1; j++) {
             if (seq1[j] != seq2[j]) {
-                LLAMA_LOG_WARN("Sequence %zu data differs at position %d: %d vs %d",
+                LLAMA_LOG_WARN("Sequence %zu data differs at position %d: %d vs %d\n",
                               i, j, seq1[j], seq2[j]);
                 return false;
             }
@@ -236,22 +235,23 @@ bool datasets_equal(struct llama_dataset* dataset1, struct llama_dataset* datase
     return true;
 }
 
-// Validate GGUF conversion
-bool validate_gguf_conversion(struct llama_dataset* original, const char* gguf_path) {
+bool llama_dataset_validate_gguf_conversion(struct llama_dataset* original, const char* gguf_path) {
     if (!original || !gguf_path) {
-        set_error("Invalid parameters for GGUF validation");
+        llama_dataset_set_error("Invalid parameters for GGUF validation");
         return false;
     }
 
     // Load the converted file
-    struct llama_dataset* converted = from_gguf(gguf_path);
+    common_params params;
+    params.in_files.push_back(gguf_path);
+    struct llama_dataset* converted = llama_dataset_from_gguf(&params);
     if (!converted) {
         // Error already set by from_gguf
         return false;
     }
 
     // Compare the datasets
-    bool result = datasets_equal(original, converted);
+    bool result = llama_dataset_equal(original, converted);
 
     // Clean up
     llama_dataset_free(converted);
@@ -260,13 +260,13 @@ bool validate_gguf_conversion(struct llama_dataset* original, const char* gguf_p
 }
 
 // Create a tensor for a tokenized sequence
-struct ggml_tensor* create_sequence_tensor(struct ggml_context* ggml_ctx,
+struct ggml_tensor* llama_dataset_create_sequence_tensor(struct ggml_context* ggml_ctx,
                                          const llama_token* tokens,
                                          int32_t n_tokens,
                                          const char* tensor_name,
                                          int32_t pad_to_length) {
     if (!ggml_ctx || !tokens || n_tokens <= 0 || !tensor_name) {
-        set_error("Invalid parameters for tensor creation");
+        llama_dataset_set_error("Invalid parameters for tensor creation");
         return nullptr;
     }
 
@@ -276,7 +276,7 @@ struct ggml_tensor* create_sequence_tensor(struct ggml_context* ggml_ctx,
     // Create tensor
     struct ggml_tensor* tensor = ggml_new_tensor_1d(ggml_ctx, GGML_TYPE_I32, final_length);
     if (!tensor) {
-        set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor");
+        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor");
         return nullptr;
     }
 
@@ -284,7 +284,7 @@ struct ggml_tensor* create_sequence_tensor(struct ggml_context* ggml_ctx,
     ggml_set_name(tensor, tensor_name);
 
     // Copy token data
-    int32_t* tensor_data = (int32_t*)tensor->data;
+    int32_t* tensor_data = static_cast<int32_t *>(tensor->data);
     memcpy(tensor_data, tokens, n_tokens * sizeof(int32_t));
 
     // Apply padding if needed
@@ -296,7 +296,6 @@ struct ggml_tensor* create_sequence_tensor(struct ggml_context* ggml_ctx,
     return tensor;
 }
 
-// Check if streaming is supported for a dataset type and file
 bool llama_dataset_supports_streaming(enum dataset_type type, const char* path) {
     // Currently only GGUF supports streaming
     if (type == DATASET_GGUF || type == DATASET_PARQUET) {
@@ -306,7 +305,6 @@ bool llama_dataset_supports_streaming(enum dataset_type type, const char* path) 
     return false;
 }
 
-// Check if streaming is enabled for a dataset
 bool llama_dataset_is_streaming_enabled(const struct llama_dataset* dataset) {
     if (!dataset) {
         return false;
@@ -315,7 +313,6 @@ bool llama_dataset_is_streaming_enabled(const struct llama_dataset* dataset) {
     return dataset->streaming;
 }
 
-// Get the type of a dataset
 enum dataset_type llama_dataset_get_type(const struct llama_dataset* dataset) {
     if (!dataset) {
         return DATASET_GGUF; // Default
@@ -324,14 +321,13 @@ enum dataset_type llama_dataset_get_type(const struct llama_dataset* dataset) {
     return dataset->type;
 }
 
-// Validate and optimize tensor cache
-bool validate_and_optimize_tensor_cache(struct llama_dataset* dataset) {
+bool llama_dataset_validate_and_optimize_tensor_cache(struct llama_dataset* dataset) {
     if (!dataset || !dataset->cached_tensors) {
-        set_error("Invalid dataset for tensor cache optimization");
+        llama_dataset_set_error("Invalid dataset for tensor cache optimization");
         return false;
     }
 
-    uint64_t n_seq = n_sequences(dataset);
+    uint64_t n_seq = llama_dataset_n_sequences(dataset);
     bool all_valid = true;
 
     // Check each tensor

@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 // Include dataset headers
+#include "common.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-text.h"
 #include "llama-dataset.h"
@@ -61,7 +62,9 @@ public:
             // Measure full loading
             size_t memory_before_full = get_memory_usage();
             result.load_time_ratio = measure_time_ms([&]() {
-                full_dataset = llama_dataset_load_gguf(test_file.c_str(), false);
+                common_params params;
+                params.in_files.push_back(test_file);
+                full_dataset = llama_dataset_load_gguf(&params);
             });
             size_t memory_after_full = get_memory_usage();
             size_t full_memory = memory_after_full - memory_before_full;
@@ -75,7 +78,10 @@ public:
             // Measure streaming loading
             size_t memory_before_streaming = get_memory_usage();
             double streaming_load_time = measure_time_ms([&]() {
-                streaming_dataset = llama_dataset_load_gguf(test_file.c_str(), true);
+                common_params params;
+                params.in_files.push_back(test_file);
+                params.dataset_streaming = true;
+                streaming_dataset = llama_dataset_load_gguf(&params);
             });
             size_t memory_after_streaming = get_memory_usage();
             size_t streaming_memory = memory_after_streaming - memory_before_streaming;
@@ -109,8 +115,8 @@ public:
             }
 
             // Issue 3: Test data consistency
-            int full_count = llama_dataset_get_sequence_count(full_dataset);
-            int streaming_count = llama_dataset_get_sequence_count(streaming_dataset);
+            int full_count = llama_dataset_n_sequences(full_dataset);
+            int streaming_count = llama_dataset_n_sequences(streaming_dataset);
 
             if (full_count != streaming_count) {
                 result.issues_found.push_back("Sequence count mismatch between streaming and full modes");
@@ -119,15 +125,15 @@ public:
             }
 
             // Issue 4: Test random access performance
-            /*std::cout << "Testing random access performance..." << std::endl;
+            std::cout << "Testing random access performance..." << std::endl;
 
             auto test_random_access = [](struct llama_dataset* dataset) {
                 auto start = std::chrono::high_resolution_clock::now();
-                int seq_count = llama_dataset_get_sequence_count(dataset);
+                int seq_count = llama_dataset_n_sequences(dataset);
                 for (int i = 0; i < std::min(50, seq_count); i++) {
                     int random_idx = (i * 7) % seq_count;
-                    llama_dataset_get_sequence_length(dataset, random_idx);
-                    sequence(dataset, random_idx);
+                    llama_dataset_sequence_length(dataset, random_idx);
+                    llama_dataset_sequence(dataset, random_idx);
                 }
                 auto end = std::chrono::high_resolution_clock::now();
                 return std::chrono::duration<double, std::milli>(end - start).count();
@@ -163,10 +169,10 @@ public:
 
             auto test_sequential_access = [](struct llama_dataset* dataset) {
                 auto start = std::chrono::high_resolution_clock::now();
-                int seq_count = llama_dataset_get_sequence_count(dataset);
+                int seq_count = llama_dataset_n_sequences(dataset);
                 for (int i = 0; i < std::min(20, seq_count); i++) {
-                    llama_dataset_get_sequence_length(dataset, i);
-                    sequence(dataset, i);
+                    llama_dataset_sequence_length(dataset, i);
+                    llama_dataset_sequence(dataset, i);
                 }
                 auto end = std::chrono::high_resolution_clock::now();
                 return std::chrono::duration<double, std::milli>(end - start).count();
@@ -179,7 +185,7 @@ public:
                 result.issues_found.push_back("Sequential access in streaming mode is slow");
                 result.optimizations_needed.push_back("Implement read-ahead buffering for sequential access");
                 result.has_issues = true;
-            }*/
+            }
 
         } catch (const std::exception& e) {
             result.issues_found.push_back(std::string("Exception during analysis: ") + e.what());
@@ -214,7 +220,11 @@ public:
         }
 
         // Test Parquet streaming implementation
-        struct llama_dataset* parquet_dataset = llama_dataset_load_parquet("test_data/parquet_dataset.parquet", true);
+        common_params params;
+        params.in_files.push_back("test_data/parquet_dataset.parquet");
+        params.dataset_streaming = true;
+#ifdef LLAMA_PARQUET
+        struct llama_dataset* parquet_dataset = llama_dataset_from_parquet(&params);
         if (!parquet_dataset) {
             result.issues_found.push_back("Failed to load Parquet dataset in streaming mode");
             result.has_issues = true;
@@ -229,6 +239,7 @@ public:
         }
 
         llama_dataset_free(parquet_dataset);
+#endif
         return result;
     }
 
@@ -246,10 +257,11 @@ public:
         }
 
         // Test loading text with streaming flag (should fallback)
-        struct llama_dataset* text_dataset = llama_dataset_load_text_internal("test_data/text_dataset.txt", nullptr, true);
-        if (text_dataset) {
-            bool is_streaming = llama_dataset_is_streaming_enabled(text_dataset);
-            if (is_streaming) {
+        common_params params;
+        params.in_files.push_back("test_data/text_dataset.txt");
+        params.dataset_streaming = true;
+        if (struct llama_dataset * text_dataset = llama_dataset_load_text_internal(&params, nullptr)) {
+            if (llama_dataset_is_streaming_enabled(text_dataset)) {
                 std::cout << "⚠️  Text dataset incorrectly enabled streaming mode" << std::endl;
             } else {
                 std::cout << "✅ Text dataset correctly fell back to non-streaming mode" << std::endl;
