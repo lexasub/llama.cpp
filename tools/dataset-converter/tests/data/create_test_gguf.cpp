@@ -6,7 +6,7 @@
 
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
-#include "llama-dataset-gguf-utils.h"
+#include "llama-dataset.h"
 
 // Simple utility to create a test GGUF dataset file
 int main() {
@@ -33,7 +33,7 @@ int main() {
     }
 
     // Add metadata
-    gguf_set_val_str(ctx, "dataset.source", "test");
+    gguf_set_val_str(ctx, TRAINING_FORMAT_SOURCE, "test");
     gguf_set_val_u64(ctx, "dataset.n_sequences", 3);
     gguf_set_val_u32(ctx, "dataset.max_length", 10);
 

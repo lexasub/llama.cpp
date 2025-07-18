@@ -1,9 +1,8 @@
 #include "streaming-optimization-manager.h"
 
-#include "../../common/log.h"
 #include "llama-impl.h"
 
-StreamingOptimizationManager::StreamingOptimizationManager(const std::string& name)
+llama_dataset_stream_optimization_manager::llama_dataset_stream_optimization_manager(const std::string& name)
     : dataset_name(name),
       optimization_enabled(true),
       access_count(0),
@@ -12,15 +11,15 @@ StreamingOptimizationManager::StreamingOptimizationManager(const std::string& na
       last_accessed_id(0) {
 }
 
-StreamingOptimizationManager::~StreamingOptimizationManager() {
+llama_dataset_stream_optimization_manager::~llama_dataset_stream_optimization_manager() {
     stop();
 }
 
-void StreamingOptimizationManager::initialize(size_t cache_size) {
+void llama_dataset_stream_optimization_manager::initialize(size_t cache_size) {
     // Create components
-    cache = std::make_unique<StreamingCache>(cache_size);
-    read_ahead = std::make_unique<StreamingReadAhead>(5, 20);
-    memory_monitor = std::make_unique<StreamingMemoryMonitor>(1000, 0.8, 0.6);
+    cache = std::make_unique<llama_dataset_streaming_cache>(cache_size);
+    read_ahead = std::make_unique<llama_dataset_streaming_read_ahead>(5, 20);
+    memory_monitor = std::make_unique<llama_dataset_streaming_memory_monitor>(1000, 0.8, 0.6);
 
     // Set up callbacks
     memory_monitor->set_pressure_callback([this](double pressure) {
@@ -34,7 +33,7 @@ void StreamingOptimizationManager::initialize(size_t cache_size) {
     LLAMA_LOG_DEBUG("Initialized streaming optimization manager for dataset '%s'", dataset_name.c_str());
 }
 
-void StreamingOptimizationManager::start() {
+void llama_dataset_stream_optimization_manager::start() {
     if (!optimization_enabled) {
         LLAMA_LOG_DEBUG("Streaming optimization is disabled for dataset '%s'", dataset_name.c_str());
         return;
@@ -47,7 +46,7 @@ void StreamingOptimizationManager::start() {
     LLAMA_LOG_DEBUG("Started streaming optimization for dataset '%s'", dataset_name.c_str());
 }
 
-void StreamingOptimizationManager::stop() {
+void llama_dataset_stream_optimization_manager::stop() {
     // Stop components
     if (read_ahead) {
         read_ahead->stop();
@@ -60,7 +59,7 @@ void StreamingOptimizationManager::stop() {
     LLAMA_LOG_DEBUG("Stopped streaming optimization for dataset '%s'", dataset_name.c_str());
 }
 
-void* StreamingOptimizationManager::get_sequence(uint64_t sequence_id) {
+void* llama_dataset_stream_optimization_manager::get_sequence(uint64_t sequence_id) {
     if (!optimization_enabled || !cache) {
         return nullptr;
     }
@@ -79,7 +78,7 @@ void* StreamingOptimizationManager::get_sequence(uint64_t sequence_id) {
     return data;
 }
 
-void StreamingOptimizationManager::put_sequence(uint64_t sequence_id, void* data, size_t size) {
+void llama_dataset_stream_optimization_manager::put_sequence(uint64_t sequence_id, void* data, size_t size) {
     if (!optimization_enabled || !cache) {
         return;
     }
@@ -87,29 +86,29 @@ void StreamingOptimizationManager::put_sequence(uint64_t sequence_id, void* data
     cache->put(sequence_id, data, size);
 }
 
-void StreamingOptimizationManager::set_prefetch_callback(PrefetchCallback callback) {
+void llama_dataset_stream_optimization_manager::set_prefetch_callback(PrefetchCallback callback) {
     prefetch_callback = callback;
 }
 
-void StreamingOptimizationManager::set_cache_size(size_t size) {
+void llama_dataset_stream_optimization_manager::set_cache_size(size_t size) {
     if (cache) {
         cache->set_max_memory(size);
     }
 }
 
-void StreamingOptimizationManager::set_read_ahead_window(size_t window) {
+void llama_dataset_stream_optimization_manager::set_read_ahead_window(size_t window) {
     if (read_ahead) {
         read_ahead->set_window_size(window);
     }
 }
 
-void StreamingOptimizationManager::set_memory_check_interval(size_t interval_ms) {
+void llama_dataset_stream_optimization_manager::set_memory_check_interval(size_t interval_ms) {
     if (memory_monitor) {
         memory_monitor->set_check_interval(interval_ms);
     }
 }
 
-void StreamingOptimizationManager::set_optimization_enabled(bool enabled) {
+void llama_dataset_stream_optimization_manager::set_optimization_enabled(bool enabled) {
     optimization_enabled = enabled;
 
     if (enabled) {
@@ -119,7 +118,7 @@ void StreamingOptimizationManager::set_optimization_enabled(bool enabled) {
     }
 }
 
-void StreamingOptimizationManager::set_read_ahead_enabled(bool enabled) {
+void llama_dataset_stream_optimization_manager::set_read_ahead_enabled(bool enabled) {
     if (read_ahead) {
         if (enabled) {
             read_ahead->resume();
@@ -129,13 +128,13 @@ void StreamingOptimizationManager::set_read_ahead_enabled(bool enabled) {
     }
 }
 
-void StreamingOptimizationManager::set_adaptive_cache_enabled(bool enabled) {
+void llama_dataset_stream_optimization_manager::set_adaptive_cache_enabled(bool enabled) {
     if (cache) {
         cache->set_adaptive_sizing(enabled, 0.8);
     }
 }
 
-StreamingOptimizationManager::OptimizationStats StreamingOptimizationManager::get_stats() const {
+llama_dataset_stream_optimization_manager::OptimizationStats llama_dataset_stream_optimization_manager::get_stats() const {
     OptimizationStats stats;
 
     if (cache) {
@@ -159,7 +158,7 @@ StreamingOptimizationManager::OptimizationStats StreamingOptimizationManager::ge
     return stats;
 }
 
-void StreamingOptimizationManager::handle_memory_pressure(double pressure) {
+void llama_dataset_stream_optimization_manager::handle_memory_pressure(double pressure) {
     if (!optimization_enabled || !cache) {
         return;
     }
@@ -171,20 +170,18 @@ void StreamingOptimizationManager::handle_memory_pressure(double pressure) {
         size_t new_max = current_max * 0.8;
         cache->set_max_memory(new_max);
 
-        LLAMA_LOG_DEBUG("High memory pressure (%.2f) - reduced cache size to %zu bytes",
-                       pressure, new_max);
+        LLAMA_LOG_DEBUG("High memory pressure (%.2f) - reduced cache size to %zu bytes\n", pressure, new_max);
     } else if (pressure < 0.6) {
         // Low pressure - increase cache size
         size_t current_max = cache->get_max_memory();
         size_t new_max = current_max * 1.2;
         cache->set_max_memory(new_max);
 
-        LLAMA_LOG_DEBUG("Low memory pressure (%.2f) - increased cache size to %zu bytes",
-                       pressure, new_max);
+        LLAMA_LOG_DEBUG("Low memory pressure (%.2f) - increased cache size to %zu bytes\n", pressure, new_max);
     }
 }
 
-void StreamingOptimizationManager::handle_prefetch(uint64_t sequence_id) {
+void llama_dataset_stream_optimization_manager::handle_prefetch(uint64_t sequence_id) {
     if (!optimization_enabled || !prefetch_callback || !cache) {
         return;
     }
@@ -201,11 +198,11 @@ void StreamingOptimizationManager::handle_prefetch(uint64_t sequence_id) {
     if (data && size > 0) {
         // Add to cache
         cache->put(sequence_id, data, size);
-        LLAMA_LOG_DEBUG("Prefetched sequence %zu (size: %zu bytes)", sequence_id, size);
+        LLAMA_LOG_DEBUG("Prefetched sequence %zu (size: %zu bytes)\n", sequence_id, size);
     }
 }
 
-void StreamingOptimizationManager::update_access_pattern(uint64_t sequence_id) {
+void llama_dataset_stream_optimization_manager::update_access_pattern(uint64_t sequence_id) {
     access_count++;
 
     // Check if this is sequential access

@@ -1,9 +1,8 @@
-#include "test-data-validator.h"
-#include "llama-dataset.h"
-#include "common/log.h"
-
 #include <iostream>
-#include <cassert>
+
+#include "../../validation/test-data-validator.h"
+#include "common.h"
+#include "llama-dataset.h"
 
 /**
  * @brief Integration test to verify that the test data validation system
@@ -26,15 +25,17 @@ int main() {
 
     // Test GGUF file loading
     std::cout << "Testing GGUF file loading...\n";
-    struct llama_dataset* gguf_dataset = from_gguf("test_data/small_dataset.gguf");
+    common_params params;
+    params.in_files.push_back("test_data/small_dataset.gguf");
+    struct llama_dataset* gguf_dataset = llama_dataset_from_gguf(&params);
     if (gguf_dataset) {
-        uint64_t seq_count = n_sequences(gguf_dataset);
+        uint64_t seq_count = llama_dataset_n_sequences(gguf_dataset);
         std::cout << "✓ GGUF dataset loaded successfully with " << seq_count << " sequences\n";
 
         // Test sequence access
         if (seq_count > 0) {
-            int32_t seq_len = sequence_length(gguf_dataset, 0);
-            const int32_t* seq_data = sequence(gguf_dataset, 0);
+            int32_t seq_len = llama_dataset_sequence_length(gguf_dataset, 0);
+            const int32_t* seq_data = llama_dataset_sequence(gguf_dataset, 0);
             if (seq_data && seq_len > 0) {
                 std::cout << "✓ First sequence has length " << seq_len << " and valid data\n";
             } else {
@@ -95,9 +96,10 @@ int main() {
         std::cout << "✓ Test GGUF file created successfully\n";
 
         // Verify the created file can be loaded
-        struct llama_dataset* created_dataset = from_gguf("test_data/test_created.gguf");
+        params.in_files.back() = "test_data/test_created.gguf";
+        struct llama_dataset* created_dataset = llama_dataset_from_gguf(&params);
         if (created_dataset) {
-            uint64_t created_seq_count = n_sequences(created_dataset);
+            uint64_t created_seq_count = llama_dataset_n_sequences(created_dataset);
             std::cout << "✓ Created GGUF dataset loaded with " << created_seq_count << " sequences\n";
             llama_dataset_free(created_dataset);
         } else {

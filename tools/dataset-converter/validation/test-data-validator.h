@@ -9,14 +9,12 @@
  * are present, valid, and accessible.
  */
 
-#include "llama-dataset.h"
-#include "../../include/llama.h"
-
 #include <stdint.h>
-#include <stdbool.h>
+
 #include <string>
 #include <vector>
-#include <map>
+
+#include "llama-dataset.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -205,23 +203,23 @@ private:
 
 public:
     explicit TestDataValidator(const std::string& test_data_dir);
-    
+
     // Validation methods
     bool ValidateAllFiles();
     bool CreateMissingFiles();
     bool FixPermissions();
-    
+
     // Individual file validation
     test_data_validation_result ValidateFile(const std::string& path, dataset_type type);
-    
+
     // Report generation
     test_data_validation_report GenerateReport();
     void PrintReport(const test_data_validation_report& report);
-    
+
     // File creation
-    bool CreateMinimalDataset(const std::string& path, dataset_type type, 
+    bool CreateMinimalDataset(const std::string& path, dataset_type type,
                              uint64_t num_sequences = 5, int32_t sequence_length = 10);
-    
+
     // Utility methods
     std::vector<std::string> GetMissingFiles();
     std::vector<std::string> GetCorruptedFiles();

@@ -1,14 +1,11 @@
 #pragma once
 
-#include <unordered_map>
-#include <list>
-#include <vector>
-#include <cstdint>
-#include <cstddef>
-#include <mutex>
-#include <atomic>
-#include <memory>
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 /**
  * @brief Enhanced LRU Cache for streaming dataset sequences
@@ -25,10 +22,10 @@
 #include <shared_mutex>
 #include <cstring>
 #include <sys/resource.h>
-#include "../../common/log.h"
+#include "common/log.h"
 #include "llama-impl.h"
 
-class StreamingCache {
+class llama_dataset_streaming_cache {
 public:
     enum class EvictionPolicy {
         LRU,
@@ -47,7 +44,7 @@ public:
         double hit_ratio = 0.0;
     };
 
-    explicit StreamingCache(size_t max_memory)
+    explicit llama_dataset_streaming_cache(size_t max_memory)
         : max_memory_bytes(max_memory),
           current_memory_bytes(0),
           read_ahead_enabled(false),
@@ -62,7 +59,7 @@ public:
           adaptive_sizing_enabled(true),
           initial_max_memory(max_memory) {}
 
-    ~StreamingCache() {
+    ~llama_dataset_streaming_cache() {
         clear();
     }
 
@@ -99,7 +96,7 @@ public:
     void set_adaptive_sizing(bool enabled, double pressure_threshold);
 
     CacheStats get_stats() const;
-    size_t get_max_memory();
+    size_t get_max_memory() const;
 
   private:
     size_t max_memory_bytes;

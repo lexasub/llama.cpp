@@ -1,6 +1,8 @@
-#include "llama-dataset.h"
-#include <iostream>
 #include <cassert>
+#include <iostream>
+
+#include "common.h"
+#include "llama-dataset.h"
 
 /**
  * Test for GGUF streaming support.
@@ -21,19 +23,21 @@ int main() {
 
     // Load dataset in non-streaming mode
     std::cout << "Loading dataset in non-streaming mode..." << std::endl;
-    struct llama_dataset* non_streaming = llama_dataset_load_gguf(test_file, false);
+    common_params params;
+    params.in_files.push_back(test_file);
+    struct llama_dataset* non_streaming = llama_dataset_load_gguf(&params);
     if (!non_streaming) {
         std::cerr << "Failed to load dataset in non-streaming mode: " << llama_dataset_get_error_message() << std::endl;
         return 1;
     }
 
     // Get sequence count and first sequence
-    uint64_t seq_count = n_sequences(non_streaming);
+    uint64_t seq_count = llama_dataset_n_sequences(non_streaming);
     std::cout << "Sequence count: " << seq_count << std::endl;
 
     if (seq_count > 0) {
-        int32_t seq_len = sequence_length(non_streaming, 0);
-        const int32_t* seq_data = sequence(non_streaming, 0);
+        int32_t seq_len = llama_dataset_sequence_length(non_streaming, 0);
+        const int32_t* seq_data = llama_dataset_sequence(non_streaming, 0);
 
         std::cout << "First sequence length: " << seq_len << std::endl;
         std::cout << "First sequence data available: " << (seq_data != nullptr ? "yes" : "no") << std::endl;
@@ -49,7 +53,8 @@ int main() {
 
     // Load dataset in streaming mode
     std::cout << "\nLoading dataset in streaming mode..." << std::endl;
-    struct llama_dataset* streaming = llama_dataset_load_gguf(test_file, true);
+    params.dataset_streaming = true;
+    struct llama_dataset* streaming = llama_dataset_load_gguf(&params);
     if (!streaming) {
         std::cerr << "Failed to load dataset in streaming mode: " << llama_dataset_get_error_message() << std::endl;
         llama_dataset_free(non_streaming);
@@ -61,15 +66,15 @@ int main() {
     std::cout << "Streaming mode enabled: " << (is_streaming ? "yes" : "no") << std::endl;
 
     // Get sequence count and first sequence
-    uint64_t stream_seq_count = n_sequences(streaming);
+    uint64_t stream_seq_count = llama_dataset_n_sequences(streaming);
     std::cout << "Sequence count: " << stream_seq_count << std::endl;
 
     // Verify sequence counts match
     assert(seq_count == stream_seq_count);
 
     if (stream_seq_count > 0) {
-        int32_t stream_seq_len = sequence_length(streaming, 0);
-        const int32_t* stream_seq_data = sequence(streaming, 0);
+        int32_t stream_seq_len = llama_dataset_sequence_length(streaming, 0);
+        const int32_t* stream_seq_data = llama_dataset_sequence(streaming, 0);
 
         std::cout << "First sequence length: " << stream_seq_len << std::endl;
         std::cout << "First sequence data available: " << (stream_seq_data != nullptr ? "yes" : "no") << std::endl;
@@ -82,11 +87,11 @@ int main() {
             std::cout << std::endl;
         }
 
-        int32_t seq_len = sequence_length(non_streaming, 0);
+        int32_t seq_len = llama_dataset_sequence_length(non_streaming, 0);
         // Verify sequence lengths match
         assert(seq_len == stream_seq_len);
 
-        const int32_t* seq_data = sequence(non_streaming, 0);
+        const int32_t* seq_data = llama_dataset_sequence(non_streaming, 0);
         // Verify sequence data matches
         if (seq_data && stream_seq_data) {
             bool data_matches = true;

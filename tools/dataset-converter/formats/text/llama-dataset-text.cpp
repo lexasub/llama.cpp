@@ -1,30 +1,17 @@
 #include "llama-dataset-text.h"
-#include "llama-dataset-internal.h"
-#include "llama-dataset-utils.h"
-#include "../../common/log.h"
-
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <fstream>
-#include <vector>
-
-#include "llama-dataset-text.h"
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
 #include <string>
 #include <vector>
 
-#include "../../common/log.h"
-#include "../../ggml/include/ggml.h"
-#include "../../ggml/include/gguf.h"
-#include "../../include/llama.h"
+#include "ggml/include/ggml.h"
+#include "ggml/include/gguf.h"
+#include "include/llama.h"
+#include "common.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-utils.h"
 #include "llama-impl.h"
@@ -41,7 +28,8 @@
  * @param n_tokens_max Maximum number of tokens to output
  * @return Number of tokens, or negative value on error
  */
-int32_t tokenize_line(struct llama_model * model, const char * line, int32_t line_len, llama_token * tokens, int32_t n_tokens_max) {
+int32_t llama_dataset_tokenize_line(struct llama_model * model, const char * line, int32_t line_len, llama_token * tokens, int32_t n_tokens_max);
+int32_t llama_dataset_tokenize_line(struct llama_model * model, const char * line, int32_t line_len, llama_token * tokens, int32_t n_tokens_max) {
     if (!model || !line || !tokens) {
         return -1;
     }
@@ -57,7 +45,8 @@ int32_t tokenize_line(struct llama_model * model, const char * line, int32_t lin
     // parse_special=false: treat special tokens as regular text
     return llama_tokenize(vocab, line, line_len, tokens, n_tokens_max, false, false);
 }
-bool process_and_cache_text_sequences(struct llama_dataset * dataset,
+
+bool llama_dataset_process_and_cache_text_sequences(struct llama_dataset * dataset,
                                      const std::vector<std::vector<llama_token>> & tokenized_lines,
                                      int32_t max_seq_len,
                                      bool apply_padding);
@@ -72,32 +61,36 @@ bool process_and_cache_text_sequences(struct llama_dataset * dataset,
  * @param streaming Whether to use streaming mode (currently not supported for text)
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * llama_dataset_load_text_internal(const char * path, struct llama_model * model, bool streaming) {
-    if (!path) {
-        set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Path cannot be null");
+struct llama_dataset * llama_dataset_load_text_internal(const common_params * params, struct llama_model * model) {
+    if (params->in_files.empty()) {
+        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Path cannot be empty");
+        return nullptr;
+    }
+    auto path =  params->in_files[0];//also we may refactor for walk on in_files collection or read files from dirs
+    if (path.empty()) {
+        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Path cannot be empty");
         return nullptr;
     }
 
     if (!model) {
-        set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Model cannot be null for text tokenization");
+        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Model cannot be null for text tokenization");
         return nullptr;
     }
 
     // Check if file exists
     std::ifstream file(path);
     if (!file.is_open()) {
-        set_error_with_code(DATASET_ERROR_FILE_NOT_FOUND, "Text file not found");
+        llama_dataset_set_error_with_code(DATASET_ERROR_FILE_NOT_FOUND, "Text file not found");
         return nullptr;
     }
 
     // If streaming mode is requested, warn that it's not supported for text files
-    if (streaming) {
+    if (params->dataset_streaming) {
         LLAMA_LOG_WARN("Streaming mode not supported for text files, falling back to full loading");
-        streaming = false;
     }
 
     // Create dataset structure
-    struct llama_dataset * dataset = dataset_alloc(DATASET_TEXT, streaming);
+    struct llama_dataset * dataset = llama_dataset_alloc(DATASET_TEXT, false);
     if (!dataset) {
         return nullptr; // Error already set by dataset_alloc
     }
@@ -118,18 +111,18 @@ struct llama_dataset * llama_dataset_load_text_internal(const char * path, struc
         }
 
         // Tokenize the line
-        int32_t n_tokens = tokenize_line(model, line.c_str(), line.length(), tokens.data(), max_tokens_per_line);
+        int32_t n_tokens = llama_dataset_tokenize_line(model, line.c_str(), line.length(), tokens.data(), max_tokens_per_line);
 
         if (n_tokens <= 0) {
             // Error or empty line after tokenization
             if (n_tokens < 0) {
-                LLAMA_LOG_WARN("Failed to tokenize line %zu: %s", total_lines + 1, line.c_str());
+                LLAMA_LOG_WARN("Failed to tokenize line %zu: %s\n", total_lines + 1, line.c_str());
             }
             continue;
         }
 
         // Store the tokenized line
-        tokenized_lines.push_back(std::vector<llama_token>(tokens.data(), tokens.data() + n_tokens));
+        tokenized_lines.push_back(std::vector(tokens.data(), tokens.data() + n_tokens));
 
         // Update statistics
         max_seq_len = std::max(max_seq_len, n_tokens);
@@ -138,7 +131,7 @@ struct llama_dataset * llama_dataset_load_text_internal(const char * path, struc
 
     // Check if we have any valid lines
     if (tokenized_lines.empty()) {
-        set_error_with_code(DATASET_ERROR_TOKENIZATION_FAILED, "No valid lines found in the text file");
+        llama_dataset_set_error_with_code(DATASET_ERROR_TOKENIZATION_FAILED, "No valid lines found in the text file");
         llama_dataset_free(dataset);
         return nullptr;
     }
@@ -146,40 +139,40 @@ struct llama_dataset * llama_dataset_load_text_internal(const char * path, struc
     // Create GGUF context
     struct gguf_context * ctx = gguf_init_empty();
     if (!ctx) {
-        set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGUF context");
+        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGUF context");
         llama_dataset_free(dataset);
         return nullptr;
     }
 
     // Add metadata
-    gguf_set_val_str(ctx, DATASET_SOURCE_FORMAT, "text");
-    gguf_set_val_u32(ctx, DATASET_SEQUENCE_COUNT, tokenized_lines.size());
-    gguf_set_val_u32(ctx, DATASET_MAX_LENGTH, max_seq_len);
+    gguf_set_val_str(ctx, TRAINING_FORMAT_SOURCE, "text");
+    gguf_set_val_u32(ctx, TRAINING_SEQUENCE_COUNT, tokenized_lines.size());
+    gguf_set_val_u32(ctx, TRAINING_MAX_LENGTH, max_seq_len);
 
     // Add tokenizer information
     char model_desc[256];
     int32_t desc_len = llama_model_desc(model, model_desc, sizeof(model_desc));
     if (desc_len > 0) {
-        gguf_set_val_str(ctx, DATASET_TOKENIZER, model_desc);
+        gguf_set_val_str(ctx, TRAINING_TOKENIZER, model_desc);
     } else {
-        gguf_set_val_str(ctx, DATASET_TOKENIZER, "unknown");
+        gguf_set_val_str(ctx, TRAINING_TOKENIZER, "unknown");
     }
 
     // Add creation time
     time_t now = time(nullptr);
     char time_str[32];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    gguf_set_val_str(ctx, DATASET_CREATION_TIME, time_str);
+    gguf_set_val_str(ctx, TRAINING_CREATION_TIME, time_str);
 
     // Create GGML context for tensors
-    struct ggml_init_params params;
-    params.mem_size = 16 * 1024 * 1024; // Start with 16MB, will be resized as needed
-    params.mem_buffer = NULL;
-    params.no_alloc = false;
+    struct ggml_init_params tensor_params;
+    tensor_params.mem_size = 16 * 1024 * 1024; // Start with 16MB, will be resized as needed
+    tensor_params.mem_buffer = nullptr;
+    tensor_params.no_alloc = false;
 
-    struct ggml_context * ggml_ctx = ggml_init(params);
+    struct ggml_context * ggml_ctx = ggml_init(tensor_params);
     if (!ggml_ctx) {
-        set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGML context");
+        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGML context");
         gguf_free(ctx);
         llama_dataset_free(dataset);
         return nullptr;
@@ -192,7 +185,7 @@ struct llama_dataset * llama_dataset_load_text_internal(const char * path, struc
 
     // Use enhanced sequence processing with variable length handling and caching
     // This handles tensor creation, padding (if needed), and caching optimization
-    if (!process_and_cache_text_sequences(dataset, tokenized_lines, max_seq_len, false)) {
+    if (!llama_dataset_process_and_cache_text_sequences(dataset, tokenized_lines, max_seq_len, false)) {
         // Error already set by process_and_cache_text_sequences
         llama_dataset_free(dataset);
         return nullptr;
@@ -215,13 +208,18 @@ struct llama_dataset * llama_dataset_load_text_internal(const char * path, struc
  * @param pad_to_length Optional padding length (0 = no padding)
  * @return Pointer to the created tensor, or NULL on error
  */
-struct ggml_tensor * create_text_sequence_tensor(struct ggml_context * ggml_ctx,
+struct ggml_tensor * llama_dataet_create_text_sequence_tensor(struct ggml_context * ggml_ctx,
+                                               const llama_token * tokens,
+                                               int32_t n_tokens,
+                                               const char * tensor_name,
+                                               int32_t pad_to_length);
+struct ggml_tensor * llama_dataet_create_text_sequence_tensor(struct ggml_context * ggml_ctx,
                                                const llama_token * tokens,
                                                int32_t n_tokens,
                                                const char * tensor_name,
                                                int32_t pad_to_length) {
     if (!ggml_ctx || !tokens || n_tokens <= 0) {
-        set_error("Invalid parameters for tensor creation");
+        llama_dataset_set_error("Invalid parameters for tensor creation");
         return nullptr;
     }
 
@@ -231,7 +229,7 @@ struct ggml_tensor * create_text_sequence_tensor(struct ggml_context * ggml_ctx,
     // Create tensor with appropriate length
     struct ggml_tensor * tensor = ggml_new_tensor_1d(ggml_ctx, GGML_TYPE_I32, tensor_length);
     if (!tensor) {
-        set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor for sequence");
+        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor for sequence");
         return nullptr;
     }
 
@@ -242,7 +240,7 @@ struct ggml_tensor * create_text_sequence_tensor(struct ggml_context * ggml_ctx,
 
     // Verify tensor data allocation
     if (!tensor->data) {
-        set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Tensor data allocation failed");
+        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Tensor data allocation failed");
         return nullptr;
     }
 
@@ -252,7 +250,7 @@ struct ggml_tensor * create_text_sequence_tensor(struct ggml_context * ggml_ctx,
     // Apply padding if needed
     if (pad_to_length > 0 && pad_to_length > n_tokens) {
         // Fill remaining space with padding token (typically 0 or a special padding token)
-        llama_token * tensor_data = (llama_token *)tensor->data;
+        llama_token * tensor_data = static_cast<llama_token *>(tensor->data);
         for (int32_t i = n_tokens; i < pad_to_length; i++) {
             tensor_data[i] = 0; // Use 0 as padding token
         }
@@ -274,17 +272,17 @@ struct ggml_tensor * create_text_sequence_tensor(struct ggml_context * ggml_ctx,
  * @param apply_padding Whether to apply padding to sequences
  * @return true on success, false on error
  */
-bool process_and_cache_text_sequences(struct llama_dataset * dataset,
+bool llama_dataset_process_and_cache_text_sequences(struct llama_dataset * dataset,
                                      const std::vector<std::vector<llama_token>> & tokenized_lines,
                                      int32_t max_seq_len,
                                      bool apply_padding) {
     if (!dataset || !dataset->ctx || !dataset->ggml_ctx) {
-        set_error("Invalid dataset for sequence processing");
+        llama_dataset_set_error("Invalid dataset for sequence processing");
         return false;
     }
 
     if (tokenized_lines.empty()) {
-        set_error("No tokenized sequences to process");
+        llama_dataset_set_error("No tokenized sequences to process");
         return false;
     }
 
@@ -308,7 +306,7 @@ bool process_and_cache_text_sequences(struct llama_dataset * dataset,
         int32_t pad_length = apply_padding ? max_seq_len : 0;
 
         // Create tensor for this sequence
-        struct ggml_tensor * tensor = create_text_sequence_tensor(
+        struct ggml_tensor * tensor = llama_dataet_create_text_sequence_tensor(
             dataset->ggml_ctx,
             tokens.data(),
             tokens.size(),
@@ -329,18 +327,19 @@ bool process_and_cache_text_sequences(struct llama_dataset * dataset,
     dataset->n_seq = tokenized_lines.size();
 
     // Cache tensor pointers for efficient repeated access with variable length optimization
-    if (!dataset_cache_tensors(dataset)) {
+    if (!llama_dataset_cache_tensors(dataset)) {
         return false; // Error already set by dataset_cache_tensors
     }
 
     // Validate and optimize the tensor cache for variable sequence lengths
-    if (!validate_and_optimize_tensor_cache(dataset)) {
+    if (!llama_dataset_validate_and_optimize_tensor_cache(dataset)) {
         LLAMA_LOG_WARN("Tensor cache validation failed, but continuing");
         // Don't fail completely, just log the warning
     }
 
     return true;
 }
+
 /**
  * @brief Optimize tensor cache for variable sequence length access patterns.
  *
@@ -350,9 +349,10 @@ bool process_and_cache_text_sequences(struct llama_dataset * dataset,
  * @param dataset Dataset to optimize
  * @return true on success, false on error
  */
-bool optimize_text_sequence_cache(struct llama_dataset * dataset) {
+bool llama_dataset_optimize_text_sequence_cache(struct llama_dataset * dataset);
+bool llama_dataset_optimize_text_sequence_cache(struct llama_dataset * dataset) {
     if (!dataset || !dataset->cached_tensors || dataset->n_seq == 0) {
-        set_error("Invalid dataset for cache optimization");
+        llama_dataset_set_error("Invalid dataset for cache optimization");
         return false;
     }
 
@@ -368,7 +368,7 @@ bool optimize_text_sequence_cache(struct llama_dataset * dataset) {
         struct ggml_tensor * tensor = dataset->cached_tensors[i];
         if (!tensor) continue;
 
-        int32_t length = (int32_t)tensor->ne[0];
+        int32_t length = static_cast<int32_t>(tensor->ne[0]);
         sequence_lengths.push_back(length);
 
         total_tokens += length;
@@ -377,12 +377,12 @@ bool optimize_text_sequence_cache(struct llama_dataset * dataset) {
     }
 
     if (sequence_lengths.empty()) {
-        set_error("No valid sequences found for optimization");
+        llama_dataset_set_error("No valid sequences found for optimization");
         return false;
     }
 
     // Calculate statistics
-    double avg_length = (double)total_tokens / sequence_lengths.size();
+    double avg_length = static_cast<double>(total_tokens) / sequence_lengths.size();
 
     // Sort lengths to find median and percentiles
     std::sort(sequence_lengths.begin(), sequence_lengths.end());
@@ -394,7 +394,7 @@ bool optimize_text_sequence_cache(struct llama_dataset * dataset) {
     if (dataset->ctx) {
         gguf_set_val_u32(dataset->ctx, "dataset.min_length", min_length);
         gguf_set_val_u32(dataset->ctx, "dataset.max_length", max_length);
-        gguf_set_val_f32(dataset->ctx, "dataset.avg_length", (float)avg_length);
+        gguf_set_val_f32(dataset->ctx, "dataset.avg_length", static_cast<float>(avg_length));
         gguf_set_val_u32(dataset->ctx, "dataset.median_length", median_length);
         gguf_set_val_u32(dataset->ctx, "dataset.p75_length", p75_length);
         gguf_set_val_u32(dataset->ctx, "dataset.p90_length", p90_length);
@@ -409,8 +409,7 @@ bool optimize_text_sequence_cache(struct llama_dataset * dataset) {
         }
     }
 
-    LLAMA_LOG_INFO("Text sequence cache optimized: %zu sequences, lengths [%d-%d], avg=%.1f, median=%d",
-                   sequence_lengths.size(), min_length, max_length, avg_length, median_length);
+    LLAMA_LOG_INFO("Text sequence cache optimized: %zu sequences, lengths [%d-%d], avg=%.1f, median=%d\n", sequence_lengths.size(), min_length, max_length, avg_length, median_length);
 
     return true;
 }

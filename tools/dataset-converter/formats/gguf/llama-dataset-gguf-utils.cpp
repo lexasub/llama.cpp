@@ -3,9 +3,8 @@
 #include <cstdio>
 
 #include "gguf.h"
-
-// Get the total size of the data section in a GGUF context
-size_t gguf_get_data_size(const struct gguf_context * ctx) {
+size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx);
+size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx) {
     if (!ctx) {
         return 0;
     }
@@ -26,8 +25,7 @@ size_t gguf_get_data_size(const struct gguf_context * ctx) {
     return total_size;
 }
 
-// Load all tensors from a GGUF context into a GGML context
-bool gguf_load_tensors(const struct gguf_context * gguf_ctx, struct ggml_context * ggml_ctx) {
+bool llama_dataset_gguf_load_tensors(const struct gguf_context * gguf_ctx, struct ggml_context * ggml_ctx) {
     if (!gguf_ctx || !ggml_ctx) {
         fprintf(stderr, "Invalid GGUF or GGML context\n");
         return false;

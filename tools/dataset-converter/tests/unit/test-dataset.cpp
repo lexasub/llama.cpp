@@ -3,15 +3,17 @@
 #include <cstring>
 #include <fstream>
 
-#include "llama-dataset.h"
+#include "common.h"
 #include "llama-dataset-text.h"
+#include "llama-dataset.h"
 
 // Simple test for the dataset interface
 int main() {
     printf("Testing dataset interface...\n");
 
     // Test error handling with null path
-    struct llama_dataset * dataset = from_gguf(nullptr);
+    common_params params;
+    struct llama_dataset * dataset = llama_dataset_from_gguf(&params);
     assert(dataset == nullptr);
     const char * error = llama_dataset_get_error();
     assert(error != nullptr);
@@ -19,7 +21,8 @@ int main() {
     printf("✓ Null path error handling works\n");
 
     // Test error handling with non-existent file
-    dataset = from_gguf("non_existent_file.gguf");
+    params.in_files.push_back("non_existent_file.gguf");
+    dataset = llama_dataset_from_gguf(&params);
     assert(dataset == nullptr);
     error = llama_dataset_get_error();
     assert(error != nullptr);
@@ -27,14 +30,20 @@ int main() {
     printf("✓ File not found error handling works\n");
 
     // Test unimplemented functions
-    dataset = from_txt("test.txt", nullptr);
+    params.in_files.back() = "test.txt";
+    dataset = llama_dataset_from_txt(&params, nullptr);
     assert(dataset == nullptr);
     error = llama_dataset_get_error();
     assert(error != nullptr);
     assert(strstr(error, "not") != nullptr);
     printf("✓ Text loader placeholder works\n");
 
-    dataset = from_parquet("test.parquet");
+    params.in_files.back() = "test.parquet";
+#ifdef LLAMA_PARQUET
+    dataset = llama_dataset_from_parquet(&params);
+#else
+    return 0;
+#endif
     assert(dataset == nullptr);
     error = llama_dataset_get_error();
     assert(error != nullptr);
@@ -49,20 +58,22 @@ int main() {
     test_file << "Test content for compatibility functions\n";
     test_file.close();
 
-    // Test legacy functions with null path
-    dataset = llama_dataset_load_gguf(nullptr, false);
+    params.in_files.clear();
+    dataset = llama_dataset_load_gguf(&params);
     assert(dataset == nullptr);
     assert(llama_dataset_has_error());
     printf("✓ Legacy null path error handling works\n");
 
     // Test legacy functions with non-existent file
-    dataset = llama_dataset_load_gguf("non_existent_file.gguf", false);
+    params.in_files.push_back("non_existent_file.gguf");
+    dataset = llama_dataset_load_gguf(&params);
     assert(dataset == nullptr);
     assert(llama_dataset_has_error());
     printf("✓ Legacy file not found error handling works\n");
 
     // Test legacy text loading
-    dataset = llama_dataset_load_text_internal("test_compat.txt", nullptr, false);
+    params.in_files.back() = "test_compat.txt";
+    dataset = llama_dataset_load_text_internal(&params, nullptr);
     assert(dataset == nullptr);
     assert(llama_dataset_has_error());
     printf("✓ Legacy text loader placeholder works\n");

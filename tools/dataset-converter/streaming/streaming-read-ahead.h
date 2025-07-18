@@ -16,7 +16,7 @@
  * This class manages asynchronous prefetching of sequences to improve
  * sequential access performance in streaming mode.
  */
-class StreamingReadAhead {
+class llama_dataset_streaming_read_ahead {
 public:
     using PrefetchCallback = std::function<void(uint64_t)>;
     
@@ -36,8 +36,8 @@ private:
     void worker_loop();
     
 public:
-    StreamingReadAhead(size_t window = 5, size_t max_queue = 20);
-    ~StreamingReadAhead();
+    llama_dataset_streaming_read_ahead(size_t window = 5, size_t max_queue = 20);
+    ~llama_dataset_streaming_read_ahead();
     
     // Start the prefetch worker thread
     void start();
