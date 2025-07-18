@@ -22,13 +22,13 @@ void set_error_with_code(enum dataset_error code, const char* msg) {
     if (!msg) {
         msg = "Unknown error (null message)";
     }
-    
+
     g_error_state.code = code;
-    
+
     // Use safer string copying with proper bounds checking
     size_t msg_len = strlen(msg);
     size_t max_len = sizeof(g_error_state.message) - 1;
-    
+
     if (msg_len > max_len) {
         // Truncate message if too long
         memcpy(g_error_state.message, msg, max_len);
@@ -36,7 +36,7 @@ void set_error_with_code(enum dataset_error code, const char* msg) {
     } else {
         strcpy(g_error_state.message, msg);
     }
-    
+
     g_error_state.has_error = true;
 
     LLAMA_LOG_ERROR("%s", g_error_state.message);
@@ -116,7 +116,7 @@ struct llama_dataset* dataset_alloc(enum dataset_type type, bool streaming) {
             free(dataset);
             return nullptr;
         }
-        
+
         // Initialize optimization manager to nullptr (will be created on demand)
         dataset->optimization_manager = nullptr;
     }
@@ -299,7 +299,7 @@ struct ggml_tensor* create_sequence_tensor(struct ggml_context* ggml_ctx,
 // Check if streaming is supported for a dataset type and file
 bool llama_dataset_supports_streaming(enum dataset_type type, const char* path) {
     // Currently only GGUF supports streaming
-    if (type == DATASET_GGUF) {
+    if (type == DATASET_GGUF || type == DATASET_PARQUET) {
         return true;
     }
 

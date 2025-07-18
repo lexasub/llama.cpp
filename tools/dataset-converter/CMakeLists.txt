@@ -3,6 +3,8 @@ include_directories(.
         ../../common
         ../../
         ../../src
+        ../../ggml/include
+        ../../include
         ${CMAKE_CURRENT_SOURCE_DIR}/formats/gguf
         ${CMAKE_CURRENT_SOURCE_DIR}/formats/parquet
         ${CMAKE_CURRENT_SOURCE_DIR}/formats/text
@@ -62,13 +64,25 @@ endif()
 add_executable(dataset_converter "${CMAKE_CURRENT_SOURCE_DIR}/tools/convert-to-gguf.cpp")
 target_link_libraries(dataset_converter PRIVATE dataset_convert_lib)
 
+add_executable(streaming_analyzer "${CMAKE_CURRENT_SOURCE_DIR}/tools/streaming-optimization-analysis.cpp")
+target_link_libraries(streaming_analyzer PRIVATE dataset_convert_lib)
+
+add_executable(test_data_validator "${CMAKE_CURRENT_SOURCE_DIR}/tools/test-data-validation-tool.cpp")
+target_link_libraries(test_data_validator PRIVATE dataset_convert_lib)
+
 # Installation rule for the executable
-install(TARGETS dataset_converter
+install(TARGETS dataset_converter streaming_analyzer test_data_validator
     DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
 )
 
 enable_testing()
+add_executable(create-test-data ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/create_test_data.cpp)
+target_link_libraries(create-test-data PRIVATE dataset_convert_lib)
+add_executable(create-test-data-gguf ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/create_test_gguf.cpp)
+target_link_libraries(create-test-data-gguf PRIVATE dataset_convert_lib)
 
+set_target_properties(create-test-data PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_target_properties(create-test-data-gguf PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 function(add_test_target TEST_SRC)
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
@@ -79,16 +93,18 @@ function(add_test_target TEST_SRC)
     string(REPLACE " " "_" REL_TEST_NAME ${REL_TEST_NAME})
 
     add_executable(${REL_TEST_NAME} ${TEST_SRC})
+    target_link_libraries(${REL_TEST_NAME} PRIVATE dataset_convert_lib)
 
-    target_link_libraries(${REL_TEST_NAME} PRIVATE
-            dataset_convert_lib
+    set_target_properties(${REL_TEST_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+    add_test(
+            NAME ${REL_TEST_NAME}
+            COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_CURRENT_BINARY_DIR}
+            sh -c "./create-test-data && ./create-test-data-gguf && ./${REL_TEST_NAME}"
     )
-
-    add_test(NAME ${REL_TEST_NAME} COMMAND ${REL_TEST_NAME})
 endfunction()
 
 file(GLOB_RECURSE TEST_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/streaming/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp"

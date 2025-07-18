@@ -144,7 +144,7 @@ cmake --build build
 Run the tests with:
 
 ```bash
-ctest -R "dataset|streaming|integration"
+ctest -R "_unit|_streaming|_integration"
 ```
 
 ## 10. Important Note on `safetensors`

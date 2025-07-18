@@ -287,7 +287,7 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
     }
 
     // For other formats (TEXT, PARQUET), we need to create a new GGUF file
-    LLAMA_LOG_INFO("Converting %s dataset to GGUF file: %s",
+    LLAMA_LOG_INFO("Converting %s dataset to GGUF file: %s\n",
                   dataset->type == DATASET_TEXT ? "TEXT" : "PARQUET", path);
 
     // Create a new GGUF context
@@ -312,15 +312,23 @@ void to_gguf(struct llama_dataset * dataset, const char * path) {
                 case GGUF_TYPE_INT32:
                     gguf_set_val_i32(new_ctx, key, gguf_get_val_i32(dataset->ctx, i));
                     break;
+                case GGUF_TYPE_UINT32:
+                    gguf_set_val_u32(new_ctx, key, gguf_get_val_u32(dataset->ctx, i));
+                    break;
                 case GGUF_TYPE_INT64:
                     gguf_set_val_i64(new_ctx, key, gguf_get_val_i64(dataset->ctx, i));
+                    break;
+                case GGUF_TYPE_UINT64:
+                    gguf_set_val_u64(new_ctx, key, gguf_get_val_u64(dataset->ctx, i));
                     break;
                 case GGUF_TYPE_FLOAT32:
                     gguf_set_val_f32(new_ctx, key, gguf_get_val_f32(dataset->ctx, i));
                     break;
+                case GGUF_TYPE_FLOAT64:
+                    gguf_set_val_f64(new_ctx, key, gguf_get_val_f64(dataset->ctx, i));
+                    break;
                 default:
-                    // Skip other types for now
-                    LLAMA_LOG_WARN("Skipping metadata key '%s' with unsupported type %d", key, type);
+                    LLAMA_LOG_WARN("Bad metadata key '%s' with type %d", key, type);
                     break;
             }
         }

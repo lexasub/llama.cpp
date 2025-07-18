@@ -296,7 +296,7 @@ static bool create_gguf_from_parquet(const std::shared_ptr<arrow::Table>& table,
         }
     }
 
-    LLAMA_LOG_INFO("Successfully loaded %zu sequences from Parquet file (max_length=%d)",
+    LLAMA_LOG_INFO("Successfully loaded %zu sequences from Parquet file (max_length=%d)\n",
                    all_sequences.size(), max_length);
 
     return true;
@@ -519,7 +519,7 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const char * path, bo
             return nullptr;
         }
 
-        LLAMA_LOG_INFO("Successfully loaded Parquet dataset from %s (%zu sequences, streaming=%s)",
+        LLAMA_LOG_INFO("Successfully loaded Parquet dataset from %s (%zu sequences, streaming=%s)\n",
                        path, dataset->n_seq, streaming ? "true" : "false");
 
         return dataset;
