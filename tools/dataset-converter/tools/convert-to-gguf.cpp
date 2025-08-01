@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         printf("Loading Parquet dataset from %s\n", params.in_files[0].c_str());
         // Use new simple interface
 #ifdef LLAMA_PARQUET
-        dataset = llama_dataset_from_parquet(&params, model);
+        dataset = llama_dataset_from_parquet(&params);
 #endif
     } else {
         LLAMA_LOG_DEBUG("Error: unsupported input format: %s\n", ext);

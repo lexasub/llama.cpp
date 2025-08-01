@@ -27,8 +27,8 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
 }
 
 #ifdef LLAMA_DATASET_PARQUET_SUPPORT
-struct llama_dataset * llama_dataset_from_parquet(const common_params * params, struct llama_model * model) {
-    return llama_dataset_load_parquet_internal(params, model);
+struct llama_dataset * llama_dataset_from_parquet(const common_params * params) {
+    return llama_dataset_load_parquet_internal(params);
 }
 #endif
 

@@ -1,12 +1,33 @@
-#include "llama-dataset-gguf.h"
-#include "llama-dataset-internal.h"
-#include "llama-dataset-parquet.h"
-#include "llama-dataset-utils.h"
-#include "llama-dataset.h"
-
 #include <cstdio>
 #include <cstring>
 #include <string>
+
+#include "llama-dataset-gguf.h"
+#include "llama-dataset-internal.h"
+#include "llama-dataset-utils.h"
+#include "llama-dataset.h"
+
+// Helper function to get sequence data from Parquet dataset in streaming mode
+static const int32_t* llama_dataset_get_parquet_sequence_streaming(const struct llama_dataset* dataset, uint64_t index) {
+    if (!dataset) {
+        llama_dataset_set_error("Dataset is null for Parquet streaming");
+        return nullptr;
+    }
+
+    if (index >= dataset->n_seq) {
+        llama_dataset_set_error("Sequence index out of bounds for Parquet streaming");
+        return nullptr;
+    }
+
+    // Check if we already have cached streaming data for this sequence
+    if (dataset->cached_tensors && dataset->cached_tensors[index] &&
+        dataset->cached_tensors[index]->data) {
+        return static_cast<const int32_t*>(dataset->cached_tensors[index]->data);
+    }
+
+    llama_dataset_set_error("Parquet streaming not fully implemented - requires format-specific data loading");
+    return nullptr;
+}
 
 const int32_t* llama_dataset_sequence(const struct llama_dataset* dataset, uint64_t index) {
     if (!dataset) {
@@ -50,7 +71,7 @@ const int32_t* llama_dataset_sequence(const struct llama_dataset* dataset, uint6
             }
             case DATASET_PARQUET:
                 // For Parquet streaming, use the helper function
-                return llama_dataset_get_parquet_tensor_data_streaming(dataset, index, model);
+                return llama_dataset_get_parquet_sequence_streaming(dataset, index);
             case DATASET_TEXT:
                 // Text datasets don't support streaming yet, fall through to non-streaming path
                 break;
