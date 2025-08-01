@@ -18,7 +18,7 @@
  * @param streaming Whether to use streaming mode
  * @return Pointer to the dataset, or NULL on error
  */
-struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params);
+struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params, struct llama_model * model);
 
 /**
  * @brief Validate Parquet file schema.
@@ -41,4 +41,5 @@ bool llama_dataet_validate_parquet_schema(const char * path);
  * @return true if successful, false otherwise
  */
 bool llama_dataset_get_parquet_metadata(const char * path, uint64_t * n_sequences, int32_t * max_length);
+void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_dataset * dataset, uint64_t index, struct llama_model * model);
 #endif

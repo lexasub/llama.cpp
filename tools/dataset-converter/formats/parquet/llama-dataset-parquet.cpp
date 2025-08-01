@@ -1,22 +1,24 @@
 #ifdef LLAMA_DATASET_PARQUET_SUPPORT
 #include "llama-dataset-parquet.h"
 
-#include <arrow/api.h>
-#include <arrow/io/api.h>
-#include <parquet/arrow/reader.h>
-
-#include <cstdio>
-#include <cstring>
-#include <ctime>
-#include <memory>
-#include <vector>
-
 #include "common.h"
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-utils.h"
 #include "llama-impl.h"
+#include "llama-model.h"
+
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+#include <parquet/arrow/reader.h>
+
+#include <cinttypes>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <memory>
+#include <vector>
 
 /**
  * @brief Parquet-specific format data structure.
@@ -30,7 +32,11 @@ struct parquet_format_data {
     uint64_t                                    n_sequences;
     int32_t                                     max_length;
 };
-void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_dataset * dataset, uint64_t index);
+static bool llama_dataset_tokenize_text_column(const std::shared_ptr<arrow::ChunkedArray> & text_column,
+                                               struct llama_dataset * dataset,
+                                               std::vector<std::vector<int32_t>> & all_sequences,
+                                               int32_t & max_length,
+                                               struct llama_model * model);
 /**
  * @brief Convert Arrow array to token vector.
  *
@@ -103,92 +109,86 @@ static bool llama_dataset_arrow_array_to_tokens(const std::shared_ptr<arrow::Arr
  * @brief Create GGUF context from Parquet data.
  *
  * This function creates a GGUF context and populates it with data from
- * the Parquet file, converting sequences to tensors.
+ * the Parquet file. It now supports both pre-tokenized columns and raw
+ * text columns that require tokenization.
  *
  * @param table Arrow table containing the Parquet data
- * @param dataset Dataset structure to populate
+ * @param dataset Dataset structure to populate (must include model if tokenization is needed)
  * @return true on success, false on error
  */
 static bool llama_dataset_create_gguf_from_parquet(const std::shared_ptr<arrow::Table> & table,
-                                                   struct llama_dataset * dataset) {
+                                                   struct llama_dataset * dataset, struct llama_model * model) {
     if (!table || !dataset) {
         llama_dataset_set_error("Invalid parameters for GGUF creation from Parquet");
         return false;
     }
 
-    // Create GGUF context
     dataset->ctx = gguf_init_empty();
     if (!dataset->ctx) {
         llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Failed to create GGUF context");
         return false;
     }
 
-    // Find the tokens column
-    std::shared_ptr<arrow::ChunkedArray> tokens_column;
-    int tokens_column_index = -1;
+    // Find the target column
+    std::shared_ptr<arrow::ChunkedArray> data_column;
+    std::string column_name_to_find = dataset->column;
 
     for (int i = 0; i < table->num_columns(); i++) {
-        std::string column_name = table->schema()->field(i)->name();
-        if (column_name == dataset->column) {
-            tokens_column       = table->column(i);
-            tokens_column_index = i;
+        if (table->schema()->field(i)->name() == column_name_to_find) {
+            data_column = table->column(i);
             break;
         }
     }
 
-    if (!tokens_column || tokens_column_index == -1) {
-        const auto msg{"Parquet file must contain " + dataset->column + " column"};
+    if (!data_column) {
+        const auto msg{"Parquet file must contain '" + column_name_to_find + "' column"};
         llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, msg.c_str());
         return false;
     }
 
     // Set metadata
     gguf_set_val_str(dataset->ctx, TRAINING_FORMAT_SOURCE, "parquet");
-
-    // Get current time for creation timestamp
     time_t now = time(nullptr);
     char   time_str[64];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", localtime(&now));
     gguf_set_val_str(dataset->ctx, TRAINING_CREATION_TIME, time_str);
 
-    // Process each chunk in the tokens column
+    // Process column based on its type
     std::vector<std::vector<int32_t>> all_sequences;
     int32_t max_length = 0;
+    arrow::Type::type column_type_id = data_column->type()->id();
 
-    for (int chunk_idx = 0; chunk_idx < tokens_column->num_chunks(); chunk_idx++) {
-        auto chunk = tokens_column->chunk(chunk_idx);
-
-        // Handle different chunk types
-        if (chunk->type_id() == arrow::Type::LIST) {
-            // Each row is a list of tokens (sequence)
-            auto list_array = std::static_pointer_cast<arrow::ListArray>(chunk);
-
-            for (int64_t row = 0; row < list_array->length(); row++) {
-                if (list_array->IsNull(row)) {
-                    continue;
+    if (column_type_id == arrow::Type::LIST || column_type_id == arrow::Type::INT32) {
+        for (int chunk_idx = 0; chunk_idx < data_column->num_chunks(); chunk_idx++) {
+            auto chunk = data_column->chunk(chunk_idx);
+            if (chunk->type_id() == arrow::Type::LIST) {
+                auto list_array = std::static_pointer_cast<arrow::ListArray>(chunk);
+                for (int64_t row = 0; row < list_array->length(); row++) {
+                    if (list_array->IsNull(row)) continue;
+                    std::vector<int32_t> sequence_tokens;
+                    if (llama_dataset_arrow_array_to_tokens(list_array->value_slice(row), sequence_tokens) &&
+                        !sequence_tokens.empty()) {
+                        all_sequences.push_back(std::move(sequence_tokens));
+                        max_length = std::max(max_length, static_cast<int32_t>(all_sequences.back().size()));
+                    }
                 }
-
+            } else { // Assumed INT32
                 std::vector<int32_t> sequence_tokens;
-                auto slice = list_array->value_slice(row);
-
-                if (!llama_dataset_arrow_array_to_tokens(slice, sequence_tokens)) {
-                    LLAMA_LOG_WARN("Failed to convert tokens for sequence %ld in chunk %d\n", row, chunk_idx);
-                    continue;
-                }
-
-                if (!sequence_tokens.empty()) {
+                if (llama_dataset_arrow_array_to_tokens(chunk, sequence_tokens) && !sequence_tokens.empty()) {
                     all_sequences.push_back(std::move(sequence_tokens));
                     max_length = std::max(max_length, static_cast<int32_t>(all_sequences.back().size()));
                 }
             }
-        } else {
-            // Assume the entire chunk is one sequence (less common case)
-            std::vector<int32_t> sequence_tokens;
-            if (llama_dataset_arrow_array_to_tokens(chunk, sequence_tokens) && !sequence_tokens.empty()) {
-                all_sequences.push_back(std::move(sequence_tokens));
-                max_length = std::max(max_length, static_cast<int32_t>(all_sequences.back().size()));
-            }
         }
+    } else if (column_type_id == arrow::Type::STRING) {
+        if (!llama_dataset_tokenize_text_column(data_column, dataset, all_sequences, max_length, model)) {
+            // Error is already set by the helper function
+            return false;
+        }
+    } else {
+        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT,
+                                          "Unsupported column type. Must be LIST<INT32>, INT32, or STRING.");
+        return false;
     }
 
     if (all_sequences.empty()) {
@@ -309,7 +309,7 @@ static bool llama_dataset_create_gguf_from_parquet(const std::shared_ptr<arrow::
  * @param index Index of the tensor
  * @return Pointer to the tensor data, or NULL on error
  */
-void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_dataset * dataset, uint64_t index) {
+void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_dataset * dataset, uint64_t index, struct llama_model * model) {
     if (!dataset || !dataset->format_data || !dataset->streaming) {
         llama_dataset_set_error("Invalid parameters for streaming data access");
         return nullptr;
@@ -359,7 +359,9 @@ void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_datase
         // In a real implementation, we would need to handle different Parquet schemas
 
         // For list arrays, we need to find the correct row
-        if (tokens_column->chunk(0)->type_id() == arrow::Type::LIST) {
+        auto column_type_id = tokens_column->type()->id();
+        if (column_type_id == arrow::Type::LIST) {
+
             // Find the chunk and row that contains our sequence
             uint64_t row_count    = 0;
             int     chunk_idx    = 0;
@@ -408,14 +410,58 @@ void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_datase
             for (int64_t i = 0; i < int32_slice->length(); i++) {
                 data[i] = int32_slice->IsNull(i) ? 0 : int32_slice->Value(i);
             }
+        } else if (column_type_id == arrow::Type::STRING) {
+            if (!model) {
+                llama_dataset_set_error("Model not available for streaming tokenization");
+                free(data);
+                return nullptr;
+            }
+
+            // Find the chunk and row containing the desired text
+            uint64_t row_count = 0;
+            int64_t row_in_chunk = -1;
+            std::shared_ptr<arrow::StringArray> string_array;
+
+            for (int chunk_idx = 0; chunk_idx < tokens_column->num_chunks(); chunk_idx++) {
+                auto chunk = tokens_column->chunk(chunk_idx);
+                if (row_count + chunk->length() > index) {
+                    row_in_chunk = index - row_count;
+                    string_array = std::static_pointer_cast<arrow::StringArray>(chunk);
+                    break;
+                }
+                row_count += chunk->length();
+            }
+
+            if (!string_array || row_in_chunk < 0) {
+                llama_dataset_set_error("Sequence index out of bounds for streaming");
+                free(data);
+                return nullptr;
+            }
+
+            std::string text = string_array->GetString(row_in_chunk);
+            int32_t seq_length = llama_dataset_sequence_length(dataset, index);
+            if (seq_length <= 0) {
+                llama_dataset_set_error("Invalid sequence length for streaming data access");
+
+                free(data);
+                return nullptr;
+            }
+
+            int n_toks = llama_tokenize(&model->vocab, text.c_str(), text.length(), data, seq_length, true, false);
+
+            if (n_toks < 0 || n_toks > seq_length) {
+                llama_dataset_set_error("Tokenization in streaming mode failed or exceeded buffer");
+                free(data);
+                return nullptr;
+            }
+
+            return data;
+
         } else {
-            // For flat arrays, we need to extract a range of values
-            // This is less common for sequence data
-            llama_dataset_set_error("Flat array streaming not implemented yet");
+            llama_dataset_set_error("Unsupported column type for streaming mode");
             free(data);
             return nullptr;
         }
-
         return data;
     } catch (const std::exception & e) {
         llama_dataset_set_error(("Streaming data access failed: " + std::string(e.what())).c_str());
@@ -427,7 +473,7 @@ void * llama_dataset_get_parquet_tensor_data_streaming(const struct llama_datase
 /**
  * @brief Load a dataset from a Parquet file (internal implementation).
  */
-struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params) {
+struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params, struct llama_model * model) {
     if (params->in_files.empty()) {
         llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Path cannot be empty");
         return nullptr;
@@ -498,7 +544,7 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const common_params *
         }
 
         // Create GGUF context from Parquet data
-        if (!llama_dataset_create_gguf_from_parquet(table, dataset)) {
+        if (!llama_dataset_create_gguf_from_parquet(table, dataset, model)) {
             // Error already set by create_gguf_from_parquet
             llama_dataset_free(dataset);
             return nullptr;
@@ -556,7 +602,9 @@ bool llama_dataet_validate_parquet_schema(const char * path) {
             return false;
         }
 
-        std::string field_name = schema->field(0)->name();//MAY be need check on some field name
+        // Find the specified column to validate (this logic would need to be enhanced
+        // to take the column name as a parameter, for now we assume the first column)
+        std::string field_name = schema->field(0)->name();
         auto field_type = schema->field(0)->type();
 
         // Validate column type
@@ -564,11 +612,11 @@ bool llama_dataet_validate_parquet_schema(const char * path) {
             // List of integers (most common case)
             auto list_type = std::static_pointer_cast<arrow::ListType>(field_type);
             if (list_type->value_type()->id() != arrow::Type::INT32) {
-                llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Tokens column must contain lists of int32 values");
+                llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Token column must contain lists of int32 values");
                 return false;
             }
-        } else if (field_type->id() != arrow::Type::INT32) {
-            llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Tokens column must be int32 or list<int32>");
+        } else if (field_type->id() != arrow::Type::INT32 && field_type->id() != arrow::Type::STRING) {
+            llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Data column must be of type int32, list<int32>, or string");
             return false;
         }
 
@@ -625,5 +673,68 @@ bool llama_dataset_get_parquet_metadata(const char * path, uint64_t * n_sequence
         return false;
     }
 }
+/**
+ * @brief Tokenize a text column and populate sequences.
+ *
+ * This function reads a column of raw text, tokenizes each entry using the
+ * provided model, and populates the list of all sequences.
+ *
+ * @param text_column The Arrow chunked array containing strings
+ * @param dataset The dataset, which must contain a valid model
+ * @param all_sequences Output vector of token sequences
+ * @param max_length Output reference to track the maximum sequence length
+ * @return true on success, false on error
+ */
+static bool llama_dataset_tokenize_text_column(const std::shared_ptr<arrow::ChunkedArray> & text_column,
+                                               struct llama_dataset * dataset,
+                                               std::vector<std::vector<int32_t>> & all_sequences,
+                                               int32_t & max_length,
+                                               struct llama_model * model) {
+    if (!model) {
+        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER,
+                                          "A llama_model is required for tokenizing text datasets");
+        return false;
+    }
 
+    // Use the model's training context length as a safe upper bound for the tokenization buffer.
+    const int32_t max_tokens_per_seq = llama_model_n_ctx_train(model);
+    std::vector<llama_token> tokenization_buffer(max_tokens_per_seq);
+
+    for (int chunk_idx = 0; chunk_idx < text_column->num_chunks(); ++chunk_idx) {
+        auto chunk = text_column->chunk(chunk_idx);
+        // Ensure the chunk is a string array, as expected.
+        if (chunk->type_id() != arrow::Type::STRING) {
+            llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_FORMAT, "Expected a string column for tokenization");
+            return false;
+        }
+        auto string_array = std::static_pointer_cast<arrow::StringArray>(chunk);
+
+        for (int64_t i = 0; i < string_array->length(); ++i) {
+            if (string_array->IsNull(i)) {
+                continue;
+            }
+
+            std::string text = string_array->GetString(i);
+            if (text.empty()) {
+                continue;
+            }
+
+            // Tokenize the text. Assuming add_bos=true and special=false as defaults.
+            // These flags could be made configurable via common_params.
+            int n_tokens = llama_tokenize(&model->vocab, text.c_str(), text.length(), tokenization_buffer.data(),
+                                          tokenization_buffer.size(), true /* add_bos */, false /* special */);
+
+            if (n_tokens < 0) {
+                LLAMA_LOG_WARN("Failed to tokenize sequence %" PRId64 " in chunk %d. It might be too long.\n", i, chunk_idx);
+                continue;
+            }
+
+            std::vector<int32_t> sequence_tokens(tokenization_buffer.begin(), tokenization_buffer.begin() + n_tokens);
+            all_sequences.push_back(std::move(sequence_tokens));
+            max_length = std::max(max_length, static_cast<int32_t>(all_sequences.back().size()));
+        }
+    }
+
+    return true;
+}
 #endif

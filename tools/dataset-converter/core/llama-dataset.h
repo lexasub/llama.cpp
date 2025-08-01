@@ -94,7 +94,7 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
  * @return Pointer to the dataset, or NULL on error
  */
 #ifdef LLAMA_DATASET_PARQUET_SUPPORT
-struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
+struct llama_dataset * llama_dataset_from_parquet(const common_params * params, struct llama_model * model);
 #endif
 /**
  * @brief Save a dataset to a GGUF file.
