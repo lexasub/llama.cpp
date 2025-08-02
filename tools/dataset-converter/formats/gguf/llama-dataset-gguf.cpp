@@ -1,9 +1,5 @@
 #include "llama-dataset-gguf.h"
 
-#include <cstdio>
-#include <cstring>
-#include <string>
-
 #include "common.h"
 #include "common/log.h"
 #include "llama-dataset-gguf-utils.h"
@@ -11,6 +7,11 @@
 #include "llama-dataset-utils.h"
 #include "llama-dataset-validation.h"
 #include "llama-impl.h"
+#include "streaming-cache.h"
+
+#include <cstdio>
+#include <cstring>
+#include <string>
 
 // Load a dataset from a GGUF file with streaming option
 struct llama_dataset* llama_dataset_load_gguf(const common_params * common_params) {

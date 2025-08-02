@@ -2,6 +2,13 @@
 
 #include "llama-dataset.h"
 
+// Forward declarations for cross-module compatibility
+struct llama_model;
+struct llama_context;
+struct ggml_context;
+struct ggml_tensor;
+typedef int32_t llama_token;
+
 /**
  * @brief Internal utility functions for dataset operations.
  *
@@ -105,3 +112,37 @@ struct ggml_tensor * llama_dataset_create_sequence_tensor(struct ggml_context * 
                                           int32_t n_tokens,
                                           const char * tensor_name,
                                           int32_t pad_to_length);
+
+/**
+ * @brief Set the tokenization model for a dataset.
+ *
+ * This function sets the llama model to be used for tokenization. The dataset
+ * can either take ownership of the model or use a shared reference.
+ *
+ * @param dataset Dataset to configure
+ * @param model Llama model for tokenization
+ * @param take_ownership Whether the dataset should own the model
+ * @return true on success, false on error
+ */
+bool llama_dataset_set_tokenization_model(struct llama_dataset * dataset, 
+                                         struct llama_model * model, 
+                                         bool take_ownership);
+
+/**
+ * @brief Initialize tokenization context for a dataset.
+ *
+ * This function creates a tokenization context from the dataset's model.
+ * The context is used for actual tokenization operations.
+ *
+ * @param dataset Dataset to initialize
+ * @return true on success, false on error
+ */
+bool llama_dataset_init_tokenization_context(struct llama_dataset * dataset);
+
+/**
+ * @brief Check if a dataset has tokenization capabilities.
+ *
+ * @param dataset Dataset to check
+ * @return true if tokenization is available, false otherwise
+ */
+bool llama_dataset_has_tokenization(const struct llama_dataset * dataset);

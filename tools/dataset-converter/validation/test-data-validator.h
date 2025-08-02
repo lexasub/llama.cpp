@@ -15,126 +15,27 @@
 #include <vector>
 
 #include "llama-dataset.h"
+#include "test-data-validator-common.h"
+#include "test-data-validator-core.h"
+#include "test-data-validator-gguf.h"
+#include "test-data-validator-parquet.h"
+#include "test-data-validator-text.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Test data validation result codes.
- */
-enum test_data_validation_result {
-    TEST_DATA_VALID = 0,                    // File is valid
-    TEST_DATA_MISSING,                      // File does not exist
-    TEST_DATA_CORRUPTED,                    // File exists but is corrupted
-    TEST_DATA_INVALID_FORMAT,               // File format is invalid
-    TEST_DATA_PERMISSION_ERROR,             // File permission issues
-    TEST_DATA_SIZE_INVALID,                 // File size is invalid (too small/large)
-    TEST_DATA_CONTENT_INVALID               // File content is invalid
-};
+// Note: Common types and structures are now defined in test-data-validator-common.h
 
-/**
- * @brief Test data file information structure.
- */
-struct test_data_file_info {
-    const char* path;                       // File path
-    enum dataset_type expected_type;        // Expected dataset type
-    uint64_t min_size_bytes;               // Minimum expected file size
-    uint64_t max_size_bytes;               // Maximum expected file size
-    uint64_t expected_sequences;           // Expected number of sequences (0 = any)
-    bool required;                         // Whether this file is required
-    bool create_if_missing;                // Whether to create if missing
-};
-
-/**
- * @brief Test data validation report structure.
- */
-struct test_data_validation_report {
-    int total_files_checked;
-    int valid_files;
-    int missing_files;
-    int corrupted_files;
-    int created_files;
-    int permission_fixes;
-    char error_messages[4096];             // Concatenated error messages
-};
+// Note: Format-specific validation and creation functions are now defined in:
+// - test-data-validator-gguf.h for GGUF format functions
+// - test-data-validator-parquet.h for Parquet format functions  
+// - test-data-validator-text.h for Text format functions
+// - test-data-validator-common.h for shared helper functions
 
 //
-// Core validation functions
+// Generic wrapper functions
 //
-
-/**
- * @brief Validate a GGUF test data file.
- *
- * @param path Path to the GGUF file
- * @return Validation result code
- */
-enum test_data_validation_result validate_gguf_test_file(const char* path);
-
-/**
- * @brief Validate a text test data file.
- *
- * @param path Path to the text file
- * @return Validation result code
- */
-enum test_data_validation_result validate_text_test_file(const char* path);
-
-/**
- * @brief Validate a Parquet test data file.
- *
- * @param path Path to the Parquet file
- * @return Validation result code
- */
-enum test_data_validation_result validate_parquet_test_file(const char* path);
-
-/**
- * @brief Check if a file has proper permissions for testing.
- *
- * @param path Path to the file
- * @return true if permissions are correct, false otherwise
- */
-bool check_file_permissions(const char* path);
-
-/**
- * @brief Fix file permissions for testing.
- *
- * @param path Path to the file
- * @return true if permissions were fixed successfully, false otherwise
- */
-bool fix_file_permissions(const char* path);
-
-//
-// Test data creation functions
-//
-
-/**
- * @brief Create a minimal valid GGUF test dataset.
- *
- * @param path Path where to create the GGUF file
- * @param num_sequences Number of sequences to create
- * @param sequence_length Length of each sequence
- * @return true on success, false on error
- */
-bool create_minimal_gguf_dataset(const char* path, uint64_t num_sequences, int32_t sequence_length);
-
-/**
- * @brief Create a minimal valid text test dataset.
- *
- * @param path Path where to create the text file
- * @param num_lines Number of lines to create
- * @return true on success, false on error
- */
-bool create_minimal_text_dataset(const char* path, uint64_t num_lines);
-
-/**
- * @brief Create a minimal valid Parquet test dataset.
- *
- * @param path Path where to create the Parquet file
- * @param num_sequences Number of sequences to create
- * @param sequence_length Length of each sequence
- * @return true on success, false on error
- */
-bool create_minimal_parquet_dataset(const char* path, uint64_t num_sequences, int32_t sequence_length);
 
 /**
  * @brief Create a corrupted test file for error handling tests.
@@ -167,13 +68,7 @@ bool validate_all_test_data(const char* test_data_dir, struct test_data_validati
  */
 bool create_missing_test_data(const char* test_data_dir, struct test_data_validation_report* report);
 
-/**
- * @brief Get a string representation of a validation result.
- *
- * @param result Validation result code
- * @return String representation of the result
- */
-const char* test_data_validation_result_to_string(enum test_data_validation_result result);
+// Note: test_data_validation_result_to_string is now defined in test-data-validator-core.h
 
 /**
  * @brief Print a validation report to stdout.

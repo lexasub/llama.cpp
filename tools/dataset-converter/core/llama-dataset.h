@@ -12,6 +12,14 @@
 #include "ggml/include/ggml.h"
 #include "include/llama.h"
 
+// Forward declarations for cross-module compatibility
+struct common_params;
+struct llama_model;
+struct llama_context;
+struct gguf_context;
+struct ggml_context;
+struct ggml_tensor;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -69,7 +77,6 @@ enum dataset_error {
 //
 // Simple procedural interface - core functions
 //
-struct common_params;
 /**
  * @brief Load a dataset from a GGUF file.
  *
@@ -93,7 +100,7 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
  * @param path Path to the Parquet file
  * @return Pointer to the dataset, or NULL on error
  */
-#ifdef LLAMA_DATASET_PARQUET_SUPPORT
+#ifdef LLAMA_PARQUET
 struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
 #endif
 /**

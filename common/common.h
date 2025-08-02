@@ -503,6 +503,12 @@ struct common_params {
     bool pre_tokenized = false;
     std::string dataset_column = "data";
     bool dataset_streaming = false;
+
+    bool dataset_tokenize_text = false;           // Enable text tokenization
+    std::string dataset_text_column = "text";     // Text column name (default: "text")
+    std::string dataset_token_column = "tokens";  // Token column name (default: "tokens")
+    size_t dataset_tokenization_cache_size = 256; // Tokenization cache size in MB
+    bool dataset_mixed_content = false;           // Handle mixed text/token content
 };
 
 // call once at the start of a program if it uses libcommon

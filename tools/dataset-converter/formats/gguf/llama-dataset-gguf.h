@@ -1,6 +1,10 @@
 #pragma once
 #include "llama-dataset.h"
 
+// Forward declarations
+struct gguf_context;
+struct ggml_context;
+
 /**
  * @brief Get tensor data from a GGUF file in streaming mode.
  *

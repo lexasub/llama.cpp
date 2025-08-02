@@ -12,9 +12,15 @@
 #include "llama-dataset.h"
 #include "ggml/include/gguf.h"
 #include "ggml/include/ggml.h"
+#include "llama.h"
 
 #ifdef __cplusplus
-#include "streaming-cache.h"
+#include <string>
+#endif
+
+// Forward declarations for Windows compatibility
+#ifdef __cplusplus
+class llama_dataset_streaming_cache;
 extern "C" {
 #endif
 
@@ -34,6 +40,12 @@ struct llama_dataset {
     enum dataset_type type;                 // Format type
     bool streaming;                         // Streaming mode flag
     void * format_data;                     // Format-specific state
+    
+    // NEW: Tokenization support
+    struct llama_model * model;             // Llama model for tokenization
+    struct llama_context * tokenizer_ctx;  // Tokenizer context
+    bool owns_model;                        // Whether dataset owns the model
+    
 #ifdef __cplusplus
     llama_dataset_streaming_cache * streaming_cache;       // LRU cache for streaming data
     void * optimization_manager;            // Streaming optimization manager

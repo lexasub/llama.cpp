@@ -11,6 +11,10 @@
 #include "llama-dataset.h"
 #include "llama-impl.h"
 
+#ifdef LLAMA_PARQUET
+#include "llama-dataset-parquet.h"
+#endif
+
 // Helper function to create a simple text dataset file for testing
 bool create_test_text_file(const char* path, const std::vector<std::string>& lines);
 bool create_test_text_file(const char* path, const std::vector<std::string>& lines) {
@@ -486,6 +490,40 @@ void test_metadata_access() {
     LLAMA_LOG_INFO("✓ Metadata access test passed\n");
 }
 
+// Test basic tokenization engine functionality
+void test_tokenization_engine_basic();
+void test_tokenization_engine_basic() {
+#ifdef LLAMA_PARQUET
+    LLAMA_LOG_INFO("Testing tokenization engine basic functionality...\n");
+
+    // Note: This test only verifies the tokenization engine can be created
+    // and configured without a real model. Full tokenization testing requires
+    // a loaded llama model which is beyond the scope of this unit test.
+
+    // Test that we can create a tokenization engine with null model
+    // (this should fail gracefully)
+    try {
+        // This should fail since model is null
+        llama_dataset_parquet_tokenizer tokenizer(nullptr);
+
+        // If we get here, the constructor didn't fail as expected
+        if (!tokenizer.is_valid()) {
+            LLAMA_LOG_INFO("✓ Tokenizer correctly reports invalid state with null model\n");
+        } else {
+            LLAMA_LOG_ERROR("✗ Tokenizer should be invalid with null model\n");
+            assert(false);
+        }
+
+    } catch (const std::exception& e) {
+        LLAMA_LOG_INFO("✓ Tokenizer constructor handled null model gracefully\n");
+    }
+
+    LLAMA_LOG_INFO("✓ Tokenization engine basic test passed\n");
+#else
+    LLAMA_LOG_INFO("Tokenization engine test skipped (Parquet support not enabled)\n");
+#endif
+}
+
 int main() {
 
     LLAMA_LOG_INFO("=== Running dataset core functionality tests ===\n");
@@ -509,6 +547,9 @@ int main() {
 
     // Test metadata access
     test_metadata_access();
+
+    // Test tokenization engine (basic functionality)
+    test_tokenization_engine_basic();
 
     LLAMA_LOG_INFO("\n=== All tests completed successfully! ===\n");
     return 0;

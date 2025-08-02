@@ -1,21 +1,22 @@
 #include "llama-dataset.h"
 
-#include <cinttypes>
-#include <cstdio>
-#include <cstring>
-#include <ctime>
-#include <fstream>
-
 #include "common.h"
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
 #include "llama-dataset-gguf-utils.h"
 #include "llama-dataset-internal.h"
+#include "llama-dataset-parquet-internal.h"
 #include "llama-dataset-parquet.h"
 #include "llama-dataset-text.h"
 #include "llama-dataset-utils.h"
 #include "src/llama-impl.h"
 #include "streaming-optimization-manager.h"
+
+#include <cinttypes>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <fstream>
 
 // Factory functions - simple implementations as wrappers
 struct llama_dataset * llama_dataset_from_gguf(const common_params * params) {
@@ -26,7 +27,7 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
     return llama_dataset_load_text_internal(params, model);
 }
 
-#ifdef LLAMA_DATASET_PARQUET_SUPPORT
+#ifdef LLAMA_PARQUET
 struct llama_dataset * llama_dataset_from_parquet(const common_params * params) {
     return llama_dataset_load_parquet_internal(params);
 }
@@ -366,6 +367,17 @@ void llama_dataset_free(struct llama_dataset * dataset) {
         return;
     }
 
+    // Free tokenization resources
+    if (dataset->tokenizer_ctx) {
+        llama_free(dataset->tokenizer_ctx);
+        dataset->tokenizer_ctx = nullptr;
+    }
+
+    if (dataset->model && dataset->owns_model) {
+        llama_model_free(dataset->model);
+        dataset->model = nullptr;
+    }
+
     // Free streaming optimization manager if it exists
     if (dataset->optimization_manager) {
         delete static_cast<llama_dataset_stream_optimization_manager *>(dataset->optimization_manager);
@@ -419,9 +431,14 @@ void llama_dataset_free(struct llama_dataset * dataset) {
 
             case DATASET_PARQUET:
                 // Clean up Parquet-specific resources
-                // For example, if format_data contains Arrow/Parquet objects
-#ifdef LLAMA_DATASET_PARQUET_SUPPORT
-                // Parquet-specific cleanup code would go here
+#ifdef LLAMA_PARQUET
+                {
+                    extern void llama_dataset_free_parquet_format_data(void * format_data);
+                    llama_dataset_free_parquet_format_data(dataset->format_data);
+                }
+#else
+                // If Parquet support is not compiled in, just free as generic pointer
+                free(dataset->format_data);
 #endif
                 break;
 

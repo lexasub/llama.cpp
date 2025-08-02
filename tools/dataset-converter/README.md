@@ -125,11 +125,30 @@ cmake --build build
 
 ## 9. Testing
 
-Run the tests with:
+The dataset converter includes comprehensive testing capabilities using CMake custom targets:
+
+### Running Tests
 
 ```bash
+# Run all CTest tests
 ctest -R "_unit|_streaming|_integration"
+
+# Run dataset-specific CTest targets
+ctest -R analyze-core-tests          # Core functionality analysis
+ctest -R run-monitored-tests         # Streaming functionality tests
+ctest -R generate-datasets           # Create comprehensive test datasets
+ctest -R run-all-dataset-tests       # Run all dataset converter tests
 ```
+
+### CMake Test Targets
+
+The following CMake targets replace the original shell scripts:
+
+- `analyze-core-tests`: Analyzes core dataset functionality (replaces analyze-core-tests.sh)
+- `run-monitored-tests`: Runs streaming functionality tests with monitoring (replaces run-monitored-tests.sh)
+- `generate-datasets`: Creates comprehensive test datasets
+- `dataset-test-analysis`: Combined analysis of all functionality
+- `setup-dataset-environment`: Sets up testing environment
 
 ## 10. Important Note on `safetensors`
 

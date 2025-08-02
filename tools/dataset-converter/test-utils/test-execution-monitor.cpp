@@ -1,13 +1,8 @@
 #include "test-execution-monitor.h"
 
-#include <dirent.h>
+#include "platform/platform-compat.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -23,7 +18,7 @@
 
 #include "src/llama-impl.h"
 
-#ifdef __linux__
+#ifdef PLATFORM_UNIX
 #include <sys/prctl.h>
 #include <execinfo.h>
 #endif
@@ -526,9 +521,9 @@ std::string format_duration(double milliseconds) {
     }
 }
 
-bool kill_process_tree(pid_t pid, int signal) {
+bool kill_process_tree(platform_pid_t pid, int signal) {
     // Kill the process group
-    if (killpg(pid, signal) == 0) {
+    if (platform_kill_process(pid, signal) == 0) {
         return true;
     }
 

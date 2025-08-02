@@ -1,18 +1,21 @@
 #include "llama-dataset-utils.h"
 
+#include "platform/platform-compat.h"
+#include "common.h"
+#include "common/log.h"
+#include "llama-dataset-internal.h"
+#include "llama-impl.h"
+#include "llama.h"
+#include "streaming-cache.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include "common.h"
-#include "common/log.h"
-#include "llama-dataset-internal.h"
-#include "llama-impl.h"
-
 // Thread-local error state
-static thread_local struct {
+static THREAD_LOCAL struct {
     enum dataset_error code;
     char message[512];
     bool has_error;
@@ -107,6 +110,11 @@ struct llama_dataset* llama_dataset_alloc(enum dataset_type type, bool streaming
     // Set type and streaming flag
     dataset->type = type;
     dataset->streaming = streaming;
+
+    // Initialize tokenization fields
+    dataset->model = nullptr;
+    dataset->tokenizer_ctx = nullptr;
+    dataset->owns_model = false;
 
     // Initialize streaming cache if in streaming mode
     if (streaming) {
@@ -339,4 +347,80 @@ bool llama_dataset_validate_and_optimize_tensor_cache(struct llama_dataset* data
     }
 
     return all_valid;
+}
+// Tokenization management functions
+
+bool llama_dataset_set_tokenization_model(struct llama_dataset * dataset,
+                                         struct llama_model * model,
+                                         bool take_ownership) {
+    if (!dataset) {
+        llama_dataset_set_error("Dataset cannot be null");
+        return false;
+    }
+
+    if (!model) {
+        llama_dataset_set_error("Model cannot be null");
+        return false;
+    }
+
+    // Free existing model if we own it
+    if (dataset->model && dataset->owns_model) {
+        llama_model_free(dataset->model);
+    }
+
+    // Free existing tokenizer context
+    if (dataset->tokenizer_ctx) {
+        llama_free(dataset->tokenizer_ctx);
+        dataset->tokenizer_ctx = nullptr;
+    }
+
+    // Set new model
+    dataset->model = model;
+    dataset->owns_model = take_ownership;
+
+    return true;
+}
+
+bool llama_dataset_init_tokenization_context(struct llama_dataset * dataset) {
+    if (!dataset) {
+        llama_dataset_set_error("Dataset cannot be null");
+        return false;
+    }
+
+    if (!dataset->model) {
+        llama_dataset_set_error("Model must be set before initializing tokenization context");
+        return false;
+    }
+
+    // Free existing context if it exists
+    if (dataset->tokenizer_ctx) {
+        llama_free(dataset->tokenizer_ctx);
+        dataset->tokenizer_ctx = nullptr;
+    }
+
+    // Create context parameters for tokenization
+    struct llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = 0; // We don't need context for tokenization
+    ctx_params.n_batch = 1;
+    ctx_params.n_ubatch = 1;
+    ctx_params.n_seq_max = 1;
+    ctx_params.no_perf = true;
+
+    // Create tokenization context
+    dataset->tokenizer_ctx = llama_init_from_model(dataset->model, ctx_params);
+    if (!dataset->tokenizer_ctx) {
+        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED,
+                                        "Failed to create tokenization context");
+        return false;
+    }
+
+    return true;
+}
+
+bool llama_dataset_has_tokenization(const struct llama_dataset * dataset) {
+    if (!dataset) {
+        return false;
+    }
+
+    return dataset->model != nullptr && dataset->tokenizer_ctx != nullptr;
 }

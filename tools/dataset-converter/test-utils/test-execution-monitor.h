@@ -8,8 +8,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <signal.h>
-#include <sys/types.h>
+#include "platform/platform-compat.h"
 
 namespace llama_dataset {
 
@@ -113,7 +112,7 @@ private:
 // Utility functions
 std::string format_memory_size(size_t bytes);
 std::string format_duration(double milliseconds);
-bool kill_process_tree(pid_t pid, int signal = SIGTERM);
+bool kill_process_tree(platform_pid_t pid, int signal = 15); // SIGTERM equivalent
 std::vector<std::string> discover_test_executables(const std::string& directory);
 
 } // namespace llama_dataset

@@ -1,7 +1,6 @@
 #include "streaming-memory-monitor.h"
 
-#include <sys/resource.h>
-#include <unistd.h>
+#include "platform/platform-compat.h"
 
 #include <chrono>
 #include <fstream>

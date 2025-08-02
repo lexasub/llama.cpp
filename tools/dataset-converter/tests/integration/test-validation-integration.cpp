@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "../../validation/test-data-validator.h"
+#include "validation/test-data-validator.h"
 #include "common.h"
 #include "llama-dataset.h"
 
