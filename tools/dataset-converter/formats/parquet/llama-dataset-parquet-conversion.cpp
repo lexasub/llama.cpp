@@ -1,10 +1,60 @@
 /**
  * @file llama-dataset-parquet-conversion.cpp
- * @brief Parquet data conversion functionality for llama.cpp dataset handling.
+ * @brief Parquet data conversion implementation for llama.cpp dataset handling.
  *
- * This file contains functions for converting Parquet data to GGUF format,
- * including Arrow array to token conversion, tensor creation, and streaming
- * data access. Split from main parquet implementation for better modularity.
+ * This module implements comprehensive Parquet data conversion functionality, providing
+ * the core conversion logic for transforming Parquet datasets into GGUF format tensors.
+ * It handles multiple data types including pre-tokenized sequences, raw text requiring
+ * tokenization, and mixed content scenarios where both formats coexist.
+ *
+ * ## Key Responsibilities
+ *
+ * - **Arrow Array Conversion**: Converts Apache Arrow arrays (Int32Array, ListArray) 
+ *   to token vectors compatible with GGML tensors
+ * - **GGUF Context Creation**: Creates and populates GGUF contexts with metadata and
+ *   tensor data from Parquet sources
+ * - **Text Tokenization**: Integrates with llama tokenizer for on-the-fly text
+ *   conversion to tokens during dataset loading
+ * - **Mixed Content Processing**: Handles Parquet files containing both text and
+ *   pre-tokenized columns with intelligent fallback strategies
+ * - **Batch Processing**: Efficiently processes large datasets with chunked data
+ *   access and memory-optimized tensor creation
+ * - **Error Handling**: Provides detailed error reporting for conversion failures
+ *   with row-level diagnostics and recovery strategies
+ *
+ * ## Data Flow Architecture
+ *
+ * 1. **Schema Analysis**: Determines column types and content structure
+ * 2. **Data Extraction**: Reads Arrow chunks from Parquet columns
+ * 3. **Type-Specific Processing**: Handles text vs pre-tokenized data differently
+ * 4. **Tokenization**: Applies llama tokenizer to text content when needed
+ * 5. **Tensor Creation**: Converts token sequences to GGML tensors
+ * 6. **GGUF Population**: Adds tensors and metadata to GGUF context
+ * 7. **Streaming Setup**: Configures streaming mode for large datasets
+ *
+ * ## Performance Considerations
+ *
+ * - Chunked processing minimizes memory usage for large Parquet files
+ * - Tokenization caching reduces redundant text processing
+ * - Streaming mode enables processing of datasets larger than available memory
+ * - Batch tokenization optimizes throughput for text-heavy datasets
+ * - Memory estimation prevents allocation failures during tensor creation
+ *
+ * ## Error Recovery
+ *
+ * The module implements robust error handling with detailed diagnostics:
+ * - Row-level error reporting for tokenization failures
+ * - Graceful handling of null values and empty sequences
+ * - Fallback strategies for mixed content scenarios
+ * - Memory allocation failure recovery
+ *
+ * @author llama.cpp dataset-converter team
+ * @version 1.0
+ * @since 2024
+ *
+ * @see llama-dataset-parquet.h for public interface definitions
+ * @see llama-dataset-parquet-internal.h for internal data structures
+ * @see streaming/streaming-cache.h for streaming implementation details
  */
 
 #include "llama-model.h"
@@ -45,14 +95,53 @@ static bool process_mixed_content_parquet(
     int32_t & max_length
 );
 /**
- * @brief Convert Arrow array to token vector.
+ * @brief Convert Arrow array to token vector with comprehensive type support.
  *
- * This function converts an Arrow array (typically Int32Array or ListArray)
- * to a vector of tokens that can be stored in a GGML tensor.
+ * This function provides robust conversion from Apache Arrow arrays to token vectors
+ * suitable for GGML tensor storage. It handles multiple Arrow data types and implements
+ * efficient memory management for large token sequences.
  *
- * @param array Arrow array containing token data
- * @param tokens Output vector for tokens
- * @return true on success, false on error
+ * ## Supported Array Types
+ *
+ * - **INT32**: Direct token arrays where each element is a single token
+ * - **LIST**: Nested arrays where each list element contains a sequence of tokens
+ *   - Supports both fixed-size and variable-length lists
+ *   - Handles nested INT32 arrays within list elements
+ *   - Flattens multiple sequences into a single token vector
+ *
+ * ## Processing Algorithm
+ *
+ * 1. **Type Detection**: Identifies Arrow array type using type_id()
+ * 2. **Memory Reservation**: Pre-allocates token vector based on array length
+ * 3. **Null Handling**: Skips null values gracefully without breaking processing
+ * 4. **Data Extraction**: Extracts token values using type-specific accessors
+ * 5. **Sequence Flattening**: For list arrays, flattens nested sequences
+ *
+ * ## Performance Characteristics
+ *
+ * - **Time Complexity**: O(n) where n is the total number of tokens
+ * - **Space Complexity**: O(n) for output vector, minimal additional overhead
+ * - **Memory Access**: Sequential access pattern optimized for cache efficiency
+ * - **Null Value Overhead**: Minimal impact due to efficient null checking
+ *
+ * ## Error Conditions
+ *
+ * - Null input array pointer
+ * - Unsupported Arrow array types
+ * - Memory allocation failures during vector operations
+ * - Corrupted nested array structures in LIST types
+ *
+ * @param array Arrow array containing token data (must not be null)
+ * @param tokens Output vector for extracted tokens (will be cleared and populated)
+ * @return true on successful conversion, false on error (error details set via llama_dataset_set_error)
+ *
+ * @note For LIST arrays, sequences are flattened into a single vector. Consider using
+ *       separate processing for maintaining sequence boundaries in advanced use cases.
+ * @note The function reserves memory based on array length for INT32 arrays but may
+ *       over-allocate for LIST arrays due to unknown nesting depth.
+ *
+ * @see llama_dataset_set_error for error reporting mechanism
+ * @see ggml_new_tensor_1d for tensor creation from resulting token vectors
  */
 bool llama_dataset_arrow_array_to_tokens(const std::shared_ptr<arrow::Array> & array,
                                                 std::vector<int32_t> &                tokens) {
@@ -113,15 +202,79 @@ bool llama_dataset_arrow_array_to_tokens(const std::shared_ptr<arrow::Array> & a
 }
 
 /**
- * @brief Create GGUF context from Parquet data with tokenization support.
+ * @brief Create GGUF context from Parquet data with comprehensive conversion support.
  *
- * This function creates a GGUF context and populates it with data from
- * the Parquet file, converting sequences to tensors. It supports both
- * pre-tokenized data and raw text that needs to be tokenized.
+ * This function implements the core conversion pipeline from Parquet data to GGUF format,
+ * handling complex scenarios including mixed content, streaming mode, and various data types.
+ * It serves as the primary entry point for Parquet-to-GGUF conversion operations.
  *
- * @param table Arrow table containing the Parquet data
- * @param dataset Dataset structure to populate
- * @return true on success, false on error
+ * ## Conversion Pipeline
+ *
+ * 1. **Input Validation**: Validates table and dataset parameters
+ * 2. **GGUF Context Creation**: Initializes empty GGUF context for data storage
+ * 3. **Schema Analysis**: Determines data column types and tokenization requirements
+ * 4. **Column Selection**: Identifies primary data columns using schema analysis
+ * 5. **Metadata Population**: Sets format, timestamp, and tokenization metadata
+ * 6. **Data Processing**: Processes chunks with type-specific conversion logic
+ * 7. **Sequence Assembly**: Collects all token sequences and calculates statistics
+ * 8. **Tensor Creation**: Creates GGML tensors for non-streaming mode
+ * 9. **Streaming Setup**: Configures streaming infrastructure for large datasets
+ *
+ * ## Data Type Support
+ *
+ * - **Pre-tokenized Data**: Direct conversion from INT32 or LIST arrays
+ * - **Text Data**: On-the-fly tokenization using integrated llama tokenizer
+ * - **Mixed Content**: Intelligent processing of files with both data types
+ * - **Chunked Data**: Efficient processing of large Parquet files with multiple chunks
+ *
+ * ## Tokenization Integration
+ *
+ * - Automatic detection of text vs pre-tokenized columns
+ * - Caching support for improved tokenization performance
+ * - Batch processing for optimal throughput
+ * - Detailed statistics collection and reporting
+ * - Error handling with row-level diagnostics
+ *
+ * ## Memory Management
+ *
+ * - **Non-streaming Mode**: Pre-allocates GGML context based on data size estimation
+ * - **Streaming Mode**: Defers tensor creation to streaming infrastructure
+ * - **Chunk Processing**: Processes data in manageable chunks to control memory usage
+ * - **Error Recovery**: Graceful handling of memory allocation failures
+ *
+ * ## Metadata Generation
+ *
+ * The function populates comprehensive metadata including:
+ * - Source format identification ("parquet")
+ * - Creation timestamp for provenance tracking
+ * - Tokenization source and column information
+ * - Sequence count and maximum length statistics
+ * - Tokenization performance metrics (when applicable)
+ *
+ * ## Error Handling
+ *
+ * - Detailed error messages with specific failure points
+ * - Graceful handling of missing or invalid columns
+ * - Recovery from partial tokenization failures
+ * - Memory allocation failure detection and reporting
+ *
+ * @param table Arrow table containing Parquet data (must not be null)
+ * @param dataset Dataset structure to populate with GGUF context and metadata (must not be null)
+ * @return true on successful conversion, false on error (detailed error set via llama_dataset_set_error)
+ *
+ * @pre dataset->format_data must point to valid parquet_format_data structure
+ * @pre dataset->column must specify target column name or be compatible with schema analysis
+ * @post On success, dataset->ctx contains populated GGUF context with tensors and metadata
+ * @post On success, dataset->n_seq contains accurate sequence count
+ * @post On streaming mode, dataset streaming infrastructure is properly configured
+ *
+ * @note For large datasets, consider enabling streaming mode to reduce memory usage
+ * @note Tokenization statistics are only available when text tokenization is performed
+ * @note Mixed content processing may take longer due to row-by-row analysis
+ *
+ * @see llama_dataset_setup_streaming_mode for streaming configuration details
+ * @see process_mixed_content_parquet for mixed content processing implementation
+ * @see handle_tokenization_error for error reporting mechanisms
  */
 bool llama_dataset_create_gguf_from_parquet(const std::shared_ptr<arrow::Table> & table,
                                                    struct llama_dataset * dataset) {
@@ -374,15 +527,53 @@ bool llama_dataset_create_gguf_from_parquet(const std::shared_ptr<arrow::Table> 
 }
 
 /**
- * @brief Handle tokenization failure with detailed error reporting.
+ * @brief Handle tokenization failure with comprehensive error diagnostics.
  *
- * This function provides detailed error reporting for tokenization failures,
- * including the specific row, column, and text content that failed to tokenize.
+ * This function provides detailed error reporting and logging for tokenization failures,
+ * enabling developers to quickly identify and resolve data quality issues. It implements
+ * intelligent text truncation and contextual error reporting to aid in debugging.
  *
- * @param row_index Row number where tokenization failed
- * @param column_name Name of the column being processed
- * @param text_content Text content that failed to tokenize (truncated for logging)
- * @param error_message Additional error message from tokenizer
+ * ## Error Reporting Features
+ *
+ * - **Row-Level Identification**: Pinpoints exact row where tokenization failed
+ * - **Column Context**: Identifies the specific column being processed
+ * - **Content Preview**: Shows truncated text content for manual inspection
+ * - **Error Message Integration**: Incorporates tokenizer-specific error details
+ * - **Intelligent Truncation**: Limits text display to prevent log overflow
+ *
+ * ## Logging Strategy
+ *
+ * The function uses structured logging with different detail levels:
+ * - Includes row and column identification for precise error location
+ * - Truncates long text content to first 100 characters for readability
+ * - Appends "..." indicator when text is truncated
+ * - Preserves original error messages from tokenizer when available
+ *
+ * ## Use Cases
+ *
+ * - **Data Quality Validation**: Identifies problematic text content during conversion
+ * - **Debugging Support**: Provides context for tokenization algorithm failures
+ * - **Performance Monitoring**: Tracks tokenization failure rates across datasets
+ * - **Error Recovery**: Enables selective processing of valid data while logging failures
+ *
+ * ## Performance Considerations
+ *
+ * - **Minimal Overhead**: Only performs string operations when errors occur
+ * - **Efficient Truncation**: Uses substr() for O(1) truncation operation
+ * - **Conditional Logging**: Avoids expensive string formatting for successful cases
+ * - **Memory Efficient**: Creates temporary strings only for error reporting
+ *
+ * @param row_index Zero-based row number where tokenization failed
+ * @param column_name Name of the column being processed (used for context)
+ * @param text_content Original text content that failed tokenization (will be truncated if > 100 chars)
+ * @param error_message Optional additional error message from tokenizer (can be nullptr)
+ *
+ * @note This function is designed for error reporting only and does not affect processing flow
+ * @note Text truncation preserves readability while preventing log file bloat
+ * @note Error messages are logged at ERROR level for visibility in production environments
+ *
+ * @see LLAMA_LOG_ERROR for logging infrastructure details
+ * @see llama_dataset_parquet_tokenizer::tokenize_text for tokenization implementation
  */
 static void handle_tokenization_error(
     int64_t row_index,
@@ -403,18 +594,77 @@ static void handle_tokenization_error(
 }
 
 /**
- * @brief Process mixed content Parquet data (both text and pre-tokenized columns).
+ * @brief Process mixed content Parquet data with intelligent fallback strategies.
  *
- * This function handles Parquet files that contain both text columns requiring
- * tokenization and pre-tokenized columns. It prioritizes tokenized data when
- * available and falls back to text tokenization when needed.
+ * This function implements sophisticated processing logic for Parquet files containing
+ * both text and pre-tokenized columns. It employs intelligent prioritization and
+ * fallback mechanisms to maximize data utilization while maintaining processing efficiency.
  *
- * @param table Arrow table containing mixed content
- * @param dataset Dataset structure to populate
- * @param format_data Parquet format data with schema information
- * @param all_sequences Output vector for all processed sequences
- * @param max_length Output for maximum sequence length
- * @return true on success, false on error
+ * ## Processing Strategy
+ *
+ * The function implements a two-tier processing approach:
+ * 1. **Primary Strategy**: Attempts to use pre-tokenized data when available
+ * 2. **Fallback Strategy**: Falls back to text tokenization when tokenized data is missing
+ *
+ * ## Row-by-Row Processing Algorithm
+ *
+ * For each row in the dataset:
+ * 1. **Token Column Check**: Searches for pre-tokenized data in primary token column
+ * 2. **Chunk Navigation**: Locates the correct chunk containing the target row
+ * 3. **Data Extraction**: Extracts token sequences using Arrow array conversion
+ * 4. **Fallback Activation**: If no tokenized data found, attempts text tokenization
+ * 5. **Text Processing**: Tokenizes text content using integrated llama tokenizer
+ * 6. **Sequence Validation**: Validates extracted sequences before adding to results
+ * 7. **Statistics Update**: Updates maximum length and sequence count metrics
+ *
+ * ## Chunk Management
+ *
+ * The function handles Arrow's chunked data structure efficiently:
+ * - Calculates chunk boundaries to locate specific rows
+ * - Maintains chunk start offsets for efficient row mapping
+ * - Handles variable chunk sizes gracefully
+ * - Minimizes chunk iteration overhead through smart indexing
+ *
+ * ## Error Handling and Recovery
+ *
+ * - **Graceful Degradation**: Continues processing when individual rows fail
+ * - **Detailed Logging**: Reports specific failures with row-level context
+ * - **Data Validation**: Validates extracted sequences before inclusion
+ * - **Memory Safety**: Handles null values and empty sequences safely
+ *
+ * ## Performance Optimizations
+ *
+ * - **Lazy Evaluation**: Only processes text when tokenized data unavailable
+ * - **Chunk Caching**: Minimizes repeated chunk access for adjacent rows
+ * - **Early Termination**: Skips further processing once valid data found
+ * - **Memory Efficiency**: Processes rows individually to control memory usage
+ *
+ * ## Data Quality Assurance
+ *
+ * - Validates both tokenized and text data before acceptance
+ * - Handles empty sequences and null values appropriately
+ * - Provides detailed error reporting for failed tokenization
+ * - Maintains data integrity through comprehensive validation
+ *
+ * @param table Arrow table containing mixed content data (must not be null)
+ * @param dataset Dataset structure for configuration access (must not be null)
+ * @param format_data Parquet format data with schema analysis results (must not be null)
+ * @param all_sequences Output vector for processed token sequences (will be populated)
+ * @param max_length Output parameter for maximum sequence length found (will be updated)
+ * @return true on successful processing, false on critical error
+ *
+ * @pre format_data->schema_analyzed must be true with valid schema information
+ * @pre format_data->tokenizer must be available if text processing is required
+ * @post all_sequences contains valid token sequences from processed rows
+ * @post max_length reflects the longest sequence found during processing
+ *
+ * @note This function is designed for complex datasets with heterogeneous content
+ * @note Processing time scales linearly with dataset size due to row-by-row analysis
+ * @note Memory usage remains bounded regardless of dataset size
+ *
+ * @see handle_tokenization_error for error reporting implementation
+ * @see llama_dataset_arrow_array_to_tokens for token extraction details
+ * @see llama_dataset_parquet_tokenizer for text tokenization capabilities
  */
 static bool process_mixed_content_parquet(
     const std::shared_ptr<arrow::Table> & table,

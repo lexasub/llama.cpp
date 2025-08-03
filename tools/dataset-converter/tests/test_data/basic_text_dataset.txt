@@ -1,0 +1,10 @@
+Hello world, this is a simple test.
+The quick brown fox jumps over the lazy dog.
+Machine learning is transforming the world.
+Natural language processing enables computers to understand text.
+Large language models can generate human-like text.
+Tokenization is the process of converting text to tokens.
+Parquet is a columnar storage format for big data.
+Streaming processing allows handling large datasets efficiently.
+Test data generation is crucial for software validation.
+This is the final sentence in our basic test dataset.

@@ -104,8 +104,8 @@ struct llama_dataset* llama_dataset_alloc(enum dataset_type type, bool streaming
         return nullptr;
     }
 
-    // Initialize all fields to zero/null
-    memset(dataset, 0, sizeof(struct llama_dataset));
+    // Initialize all fields to zero/null using proper C++ initialization
+    *dataset = {};
 
     // Set type and streaming flag
     dataset->type = type;
@@ -305,7 +305,9 @@ struct ggml_tensor* llama_dataset_create_sequence_tensor(struct ggml_context* gg
 }
 
 bool llama_dataset_supports_streaming(enum dataset_type type, const char* path) {
-    // Currently only GGUF supports streaming
+    (void)path; // Path parameter reserved for future format-specific streaming checks
+    
+    // Currently only GGUF and Parquet support streaming
     if (type == DATASET_GGUF || type == DATASET_PARQUET) {
         return true;
     }

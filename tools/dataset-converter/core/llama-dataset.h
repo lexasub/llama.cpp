@@ -2,10 +2,91 @@
 
 /**
  * @file llama-dataset.h
- * @brief Simple C interface for working with training datasets in different formats.
+ * @brief Core dataset interface for the llama.cpp dataset converter framework.
  *
- * This header provides a clean, simple interface for loading, accessing, and converting
- * training datasets in different formats (GGUF, text, Parquet).
+ * This header provides the primary C interface for working with training datasets in multiple
+ * formats (GGUF, text, Parquet) with comprehensive streaming, validation, and optimization
+ * capabilities. It serves as the central API for the modular dataset converter architecture.
+ *
+ * ## Architecture Overview
+ *
+ * The dataset converter is built with a modular architecture consisting of:
+ * - **Core Module** (this file): Primary dataset interface and data structures
+ * - **Format Modules**: Specialized loaders for GGUF, text, and Parquet formats
+ * - **Streaming Module**: Advanced streaming capabilities with caching and optimization
+ * - **Validation Module**: Comprehensive data integrity and format validation
+ * - **Platform Module**: Cross-platform compatibility and system integration
+ * - **Tools Module**: Command-line utilities and analysis tools
+ *
+ * ## Key Features
+ *
+ * - **Multi-format Support**: Native support for GGUF, text, and Parquet datasets
+ * - **Streaming Architecture**: Memory-efficient streaming with configurable caching
+ * - **Adaptive Optimization**: Dynamic cache sizing and read-ahead buffering
+ * - **Comprehensive Validation**: Format-specific and cross-format data validation
+ * - **Metadata Management**: Rich metadata support with standardized key definitions
+ * - **Error Handling**: Robust error reporting with detailed diagnostic information
+ * - **Performance Monitoring**: Built-in statistics and performance metrics
+ *
+ * ## Usage Patterns
+ *
+ * ### Basic Dataset Loading
+ * ```c
+ * // Load a GGUF dataset
+ * struct llama_dataset* dataset = llama_dataset_from_gguf(params);
+ * 
+ * // Access sequences
+ * uint64_t count = llama_dataset_n_sequences(dataset);
+ * const int32_t* tokens = llama_dataset_sequence(dataset, 0);
+ * 
+ * // Cleanup
+ * llama_dataset_free(dataset);
+ * ```
+ *
+ * ### Streaming Configuration
+ * ```c
+ * // Configure streaming optimizations
+ * llama_dataset_set_streaming_cache_size(dataset, 1024 * 1024 * 100); // 100MB cache
+ * llama_dataset_set_streaming_read_ahead(dataset, true, 10);           // Prefetch 10 sequences
+ * llama_dataset_set_adaptive_cache_sizing(dataset, true);             // Enable adaptive sizing
+ * ```
+ *
+ * ### Performance Monitoring
+ * ```c
+ * // Get streaming statistics
+ * double hit_ratio;
+ * size_t memory_usage, entry_count;
+ * llama_dataset_get_streaming_stats(dataset, &hit_ratio, &memory_usage, &entry_count);
+ * ```
+ *
+ * ## Integration with Other Modules
+ *
+ * This core interface integrates seamlessly with:
+ * - **streaming/**: Provides streaming cache management and optimization
+ * - **validation/**: Offers comprehensive dataset validation capabilities  
+ * - **formats/**: Implements format-specific loading and conversion logic
+ * - **platform/**: Ensures cross-platform compatibility and system integration
+ * - **tools/**: Provides command-line utilities and analysis tools
+ *
+ * ## Thread Safety
+ *
+ * The dataset interface is designed to be thread-safe for read operations when properly
+ * synchronized. Write operations and configuration changes should be performed from a
+ * single thread or with appropriate external synchronization.
+ *
+ * ## Memory Management
+ *
+ * The interface follows RAII principles where applicable. All resources are automatically
+ * managed through the dataset lifecycle, with explicit cleanup via llama_dataset_free().
+ * Streaming mode provides additional memory efficiency for large datasets.
+ *
+ * @see streaming/streaming-cache.h for streaming implementation details
+ * @see validation/llama-dataset-validation.h for validation capabilities
+ * @see formats/ directory for format-specific implementations
+ * @see tools/ directory for command-line utilities and analysis tools
+ *
+ * @version 1.0
+ * @since 2024
  */
 
 #include <stdint.h>
@@ -28,19 +109,40 @@ extern "C" {
  * @brief Dataset structure for storing and accessing training data.
  *
  * This structure is opaque to the user and should only be accessed through the provided functions.
- * Internally, it contains a GGUF context, a GGML context, and cached tensor pointers for efficient access.
+ * The internal implementation varies by format and includes:
+ * 
+ * - **GGUF datasets**: GGUF context, GGML context, and cached tensor pointers
+ * - **Text datasets**: Tokenized sequences with llama model integration
+ * - **Parquet datasets**: Apache Arrow integration with schema management
+ * 
+ * All formats support:
+ * - Streaming capabilities with configurable caching
+ * - Metadata management and access
+ * - Performance monitoring and statistics
+ * - Validation and integrity checking
+ * - Cross-platform compatibility
+ *
+ * The structure automatically manages memory allocation, streaming cache,
+ * and format-specific resources throughout its lifecycle.
  */
 struct llama_dataset;
 
 /**
  * @brief Standard metadata key definitions for dataset properties.
+ *
+ * These standardized keys ensure consistent metadata access across all supported
+ * formats and enable interoperability between different dataset sources.
+ * 
+ * ## Core Metadata Keys
+ * The following keys are supported across all dataset formats:
+ * 
+ * ## Extended Metadata (Future)
+ * Additional metadata keys planned for future implementation:
+ * - training.dataset.source: string (optional) - URL or description of the data source
+ * - training.tokenizer.gguf.vocab: array[string] - Tokenizer dictionary
+ * - training.tokenizer.gguf.merges: array[string] - Tokenizer merges (for BPE)
+ * - training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture
  */
-/* TODO
-training.dataset.source: string (optional) - URL or description of the data source.
-training.tokenizer.gguf.vocab: array[string] - Tokenizer dictionary.
-training.tokenizer.gguf.merges: array[string] - Tokenizer merges (for BPE).
-training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture.
-*/
 #define TRAINING_FORMAT_VERSION    "training.format.version"      // int16 (e.g. 1000) - Specification version, in case of future changes.
 #define TRAINING_FORMAT_SOURCE     "training.format.source"       // Source format (gguf, text, parquet)
 #define TRAINING_DATASET_NAME      "training.dataset.name"        // string (optional) - Dataset name (e.g. "OpenWebText-ru").
@@ -52,53 +154,81 @@ training.tokenizer.gguf.pre: string (optional) - Pre-tokenization architecture.
 
 /**
  * @brief Dataset type enumeration for format identification.
+ *
+ * Each format has specific capabilities and requirements:
+ * - GGUF: Native format with full streaming and metadata support
+ * - Parquet: Requires Apache Arrow, supports complex schemas and streaming
+ * - Text: Requires tokenization model, supports streaming with caching
  */
 enum dataset_type {
-    DATASET_GGUF,     // GGUF format (native)
-    DATASET_PARQUET,  // Parquet format (requires Arrow/Parquet support)
-    DATASET_TEXT      // Text format (requires tokenization)
+    DATASET_GGUF,     ///< GGUF format (native, full feature support)
+    DATASET_PARQUET,  ///< Parquet format (requires Arrow/Parquet support)
+    DATASET_TEXT      ///< Text format (requires tokenization model)
 };
 
 /**
  * @brief Error codes for dataset operations.
+ *
+ * Comprehensive error reporting enables detailed diagnostics and proper
+ * error handling across all modules and formats.
  */
 enum dataset_error {
-    DATASET_SUCCESS = 0,                // No error
-    DATASET_ERROR_FILE_NOT_FOUND,       // File not found
-    DATASET_ERROR_INVALID_FORMAT,       // Invalid file format
-    DATASET_ERROR_MEMORY_ALLOCATION,    // Memory allocation failed
-    DATASET_ERROR_TOKENIZATION_FAILED,  // Text tokenization failed
-    DATASET_ERROR_STREAMING_NOT_SUPPORTED, // Streaming not supported for this format
-    DATASET_ERROR_INVALID_PARAMETER,    // Invalid parameter
-    DATASET_ERROR_CONTEXT_CREATION_FAILED, // Context creation failed
-    DATASET_ERROR_IO_ERROR              // I/O error
+    DATASET_SUCCESS = 0,                ///< No error occurred
+    DATASET_ERROR_FILE_NOT_FOUND,       ///< File not found or inaccessible
+    DATASET_ERROR_INVALID_FORMAT,       ///< Invalid or corrupted file format
+    DATASET_ERROR_MEMORY_ALLOCATION,    ///< Memory allocation failed
+    DATASET_ERROR_TOKENIZATION_FAILED,  ///< Text tokenization failed
+    DATASET_ERROR_STREAMING_NOT_SUPPORTED, ///< Streaming not supported for this format/file
+    DATASET_ERROR_INVALID_PARAMETER,    ///< Invalid parameter passed to function
+    DATASET_ERROR_CONTEXT_CREATION_FAILED, ///< Context creation failed (GGML/GGUF)
+    DATASET_ERROR_IO_ERROR              ///< General I/O error during file operations
 };
 
 //
-// Simple procedural interface - core functions
+// Core Dataset Loading Interface
 //
+// These functions provide the primary entry points for loading datasets from
+// different formats. Each function is implemented by the corresponding format
+// module and integrates with the streaming and validation subsystems.
+//
+
 /**
  * @brief Load a dataset from a GGUF file.
  *
- * @param path Path to the GGUF file
+ * Loads a dataset from a GGUF file with full support for streaming, metadata,
+ * and validation. GGUF is the native format with optimal performance and
+ * feature support.
+ *
+ * @param params Common parameters including file path and streaming options
  * @return Pointer to the dataset, or NULL on error
+ * @see formats/gguf/llama-dataset-gguf.h for GGUF-specific implementation
  */
 struct llama_dataset * llama_dataset_from_gguf(const common_params * params);
 
 /**
  * @brief Load a dataset from a text file and tokenize it.
  *
- * @param path Path to the text file
- * @param model Model to use for tokenization
+ * Loads and tokenizes a text file using the specified llama model. Supports
+ * streaming with intelligent caching of tokenized sequences for memory efficiency.
+ * The tokenization process is optimized for training data preparation.
+ *
+ * @param params Common parameters including file path and processing options
+ * @param model Model to use for tokenization (must be compatible)
  * @return Pointer to the dataset, or NULL on error
+ * @see formats/text/llama-dataset-text.h for text-specific implementation
  */
 struct llama_dataset * llama_dataset_from_txt(const common_params * params, struct llama_model * model);
 
 /**
  * @brief Load a dataset from a Parquet file.
  *
- * @param path Path to the Parquet file
+ * Loads a dataset from a Parquet file using Apache Arrow integration. Supports
+ * complex schemas, streaming access, and automatic schema analysis. Requires
+ * LLAMA_PARQUET to be defined at compile time.
+ *
+ * @param params Common parameters including file path and schema options
  * @return Pointer to the dataset, or NULL on error
+ * @see formats/parquet/llama-dataset-parquet.h for Parquet-specific implementation
  */
 #ifdef LLAMA_PARQUET
 struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
@@ -106,8 +236,13 @@ struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
 /**
  * @brief Save a dataset to a GGUF file.
  *
- * @param dataset Dataset to save
- * @param path Path to the output file
+ * Converts and saves any dataset format to GGUF format, preserving metadata
+ * and ensuring optimal structure for training. The conversion process handles
+ * format-specific optimizations and validation.
+ *
+ * @param dataset Dataset to save (any supported format)
+ * @param path Path to the output GGUF file
+ * @see tools/convert-to-gguf.cpp for command-line conversion utility
  */
 void llama_dataset_to_gguf(struct llama_dataset * dataset, const char * path);
 
@@ -147,7 +282,11 @@ struct ggml_tensor * llama_dataset_sequence_tensor(const struct llama_dataset * 
 void llama_dataset_free(struct llama_dataset * dataset);
 
 //
-// Metadata access functions
+// Metadata Access Interface
+//
+// These functions provide standardized access to dataset metadata across all
+// supported formats. Metadata is automatically extracted during loading and
+// can include format-specific and user-defined properties.
 //
 
 /**
@@ -180,7 +319,11 @@ int64_t llama_dataset_get_metadata_int(const struct llama_dataset * dataset, con
 float llama_dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value);
 
 //
-// Error handling functions
+// Error Handling Interface
+//
+// Comprehensive error handling with detailed diagnostic information.
+// Error state is maintained globally and can be queried after any operation.
+// Thread-local storage ensures thread safety in multi-threaded environments.
 //
 
 /**
@@ -225,22 +368,25 @@ const char * llama_dataset_error_code_to_string(enum dataset_error code);
 void llama_dataset_clear_error(void);
 
 
-/**
- * @brief GGUF dataset loader implementation.
- *
- * This header contains functions for loading GGUF datasets.
- */
+//
+// Advanced Dataset Operations
+//
+// These functions provide advanced capabilities including streaming configuration,
+// performance monitoring, and format-specific optimizations. They integrate with
+// the streaming and validation subsystems to provide comprehensive dataset management.
+//
 
 /**
- * @brief Load a dataset from a GGUF file with streaming option.
+ * @brief Load a dataset from a GGUF file with advanced streaming options.
  *
- * This function loads a dataset from a GGUF file, with an option to use streaming mode.
- * In streaming mode, tensor data is not loaded into memory until requested, which can
- * save memory for large datasets.
+ * This function provides the advanced GGUF loading interface with comprehensive
+ * streaming configuration. In streaming mode, tensor data is loaded on-demand
+ * with intelligent caching and prefetching for optimal memory usage and performance.
  *
- * @param path Path to the GGUF file
- * @param streaming Whether to use streaming mode
+ * @param common_params Parameters including file path, streaming options, and cache configuration
  * @return Pointer to the dataset, or NULL on error
+ * @see llama_dataset_from_gguf() for the simplified interface
+ * @see streaming/streaming-cache.h for streaming implementation details
  */
 struct llama_dataset * llama_dataset_load_gguf(const common_params * common_params);
 
@@ -279,45 +425,71 @@ bool llama_dataset_is_streaming_enabled(const struct llama_dataset * dataset);
 enum dataset_type llama_dataset_get_type(const struct llama_dataset * dataset);
 
 //
-// Streaming optimization functions
+// Streaming Optimization Interface
+//
+// Advanced streaming configuration and monitoring capabilities. These functions
+// integrate with the streaming subsystem to provide fine-grained control over
+// caching behavior, memory usage, and performance optimization strategies.
+//
+// @see streaming/ directory for detailed streaming implementation
 //
 
 /**
  * @brief Configure streaming cache size for a dataset.
  *
+ * Sets the maximum memory usage for the streaming cache. The cache uses LRU
+ * eviction and can be dynamically resized. Larger caches improve performance
+ * for random access patterns but consume more memory.
+ *
  * @param dataset Dataset to configure
- * @param cache_size_bytes Maximum cache size in bytes
+ * @param cache_size_bytes Maximum cache size in bytes (0 disables caching)
  * @return true on success, false on error
+ * @see streaming/streaming-cache.h for cache implementation details
  */
 bool llama_dataset_set_streaming_cache_size(struct llama_dataset * dataset, size_t cache_size_bytes);
 
 /**
  * @brief Enable or disable read-ahead buffering for streaming.
  *
+ * Configures predictive loading to prefetch sequences based on access patterns.
+ * Read-ahead significantly improves performance for sequential access and can
+ * adapt to detected access patterns for optimal prefetching.
+ *
  * @param dataset Dataset to configure
- * @param enabled Whether to enable read-ahead
- * @param window_size Number of sequences to prefetch (default: 5)
+ * @param enabled Whether to enable read-ahead buffering
+ * @param window_size Number of sequences to prefetch (default: 5, max: 100)
  * @return true on success, false on error
+ * @see streaming/streaming-read-ahead.h for read-ahead implementation
  */
 bool llama_dataset_set_streaming_read_ahead(struct llama_dataset * dataset, bool enabled, size_t window_size);
 
 /**
  * @brief Enable or disable adaptive cache sizing based on memory pressure.
  *
+ * When enabled, the cache automatically adjusts its size based on system memory
+ * pressure and usage patterns. This provides optimal memory utilization while
+ * maintaining performance under varying system conditions.
+ *
  * @param dataset Dataset to configure
- * @param enabled Whether to enable adaptive sizing
+ * @param enabled Whether to enable adaptive cache sizing
  * @return true on success, false on error
+ * @see streaming/streaming-memory-monitor.h for memory monitoring implementation
  */
 bool llama_dataset_set_adaptive_cache_sizing(struct llama_dataset * dataset, bool enabled);
 
 /**
- * @brief Get streaming cache statistics.
+ * @brief Get streaming cache statistics and performance metrics.
+ *
+ * Provides detailed statistics about cache performance, memory usage, and
+ * access patterns. These metrics are useful for performance tuning and
+ * monitoring dataset access efficiency.
  *
  * @param dataset Dataset to query
- * @param hit_ratio Pointer to store hit ratio (0.0-1.0)
- * @param memory_usage_bytes Pointer to store current memory usage
- * @param entry_count Pointer to store number of entries in cache
- * @return true on success, false on error
+ * @param hit_ratio Pointer to store cache hit ratio (0.0-1.0, higher is better)
+ * @param memory_usage_bytes Pointer to store current cache memory usage
+ * @param entry_count Pointer to store number of cached entries
+ * @return true on success, false on error or if streaming is not enabled
+ * @see tools/streaming-optimization-analysis.cpp for detailed performance analysis
  */
 bool llama_dataset_get_streaming_stats(
     const struct llama_dataset * dataset,

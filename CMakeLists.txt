@@ -203,6 +203,17 @@ endif()
 if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_TESTS AND NOT CMAKE_JS_VERSION)
     include(CTest)
     add_subdirectory(tests)
+    
+    # Include dataset converter tests when tools are built
+    if (LLAMA_BUILD_TOOLS)
+        # Dataset converter tests are handled by tools/dataset-converter/tests/CMakeLists.txt
+        # This ensures proper test discovery and execution for the new test modules:
+        # - test_gguf_functionality.cpp
+        # - test_parquet_functionality.cpp  
+        # - test_streaming_functionality.cpp
+        # - test_validation_functionality.cpp
+        message(STATUS "Dataset converter tests will be included via tools subdirectory")
+    endif()
 endif()
 
 if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_EXAMPLES)
@@ -212,6 +223,25 @@ endif()
 
 if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_TOOLS)
     add_subdirectory(tools)
+    
+    # Add custom target for running dataset converter tests
+    if (LLAMA_BUILD_TESTS)
+        add_custom_target(test-dataset-converter
+            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target run-all-dataset-tests
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tools/dataset-converter
+            COMMENT "Running all dataset converter tests including new test modules"
+            DEPENDS dataset_converter
+        )
+        
+        # Add dataset converter tests to the main test suite
+        add_custom_target(test-all-with-dataset
+            COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target test-dataset-converter
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Running all tests including dataset converter test modules"
+            DEPENDS test-dataset-converter
+        )
+    endif()
 endif()
 
 #

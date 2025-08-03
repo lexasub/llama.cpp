@@ -52,6 +52,18 @@ struct test_data_validation_report {
     int created_files;
     int permission_fixes;
     char error_messages[4096];             // Concatenated error messages
+    
+    // Tokenization-specific statistics
+    struct {
+        uint64_t total_sequences_validated;
+        uint64_t tokenized_sequences;
+        uint64_t text_sequences;
+        uint64_t mixed_content_files;
+        uint64_t total_tokens_processed;
+        uint64_t tokenization_errors;
+        double avg_tokens_per_sequence;
+        double tokenization_success_rate;
+    } tokenization_stats;
 };
 
 //

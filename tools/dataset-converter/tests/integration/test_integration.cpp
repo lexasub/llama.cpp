@@ -1,200 +1,10 @@
-#include <cassert>
-#include <chrono>
-#include <cstdio>
-#include <cstring>
-#include <fstream>
-#include <functional>
-#include <memory>
-#include <string>
-#include <vector>
+#include "../unit/test_core_functionality.h"
 
-#include "common.h"
-#include "llama-dataset.h"
-#include "llama-impl.h"
+// TestDataCreator is now available from the shared header
 
-// Helper function to create test data files
-class TestDataCreator {
-public:
-    // Create a small GGUF test file with known content
-    static bool create_small_gguf(const char* path) {
-        // Create a simple dataset with known sequences
-        std::vector<std::vector<int32_t>> sequences = {
-            {1, 2, 3, 4, 5},           // sequence 0: length 5
-            {10, 20, 30},              // sequence 1: length 3
-            {100, 200, 300, 400}       // sequence 2: length 4
-        };
+// compare_datasets_exact is now available from the shared header
 
-        return create_gguf_from_sequences(path, sequences);
-    }
-
-    // Create equivalent Parquet file with same content
-    static bool create_equivalent_parquet(const char* path) {
-        // For now, create a placeholder - actual Parquet creation would require Arrow
-        std::ofstream file(path, std::ios::binary);
-        if (!file.is_open()) {
-            return false;
-        }
-
-        // Write minimal Parquet-like header (placeholder)
-        const char header[] = "PAR1"; // Parquet magic number
-        file.write(header, 4);
-        file.close();
-        return true;
-    }
-
-    // Create equivalent text file with same content
-    static bool create_equivalent_text(const char* path) {
-        std::ofstream file(path);
-        if (!file.is_open()) {
-            return false;
-        }
-
-        // Write sequences as text (space-separated tokens per line)
-        file << "1 2 3 4 5\n";
-        file << "10 20 30\n";
-        file << "100 200 300 400\n";
-
-        file.close();
-        return true;
-    }
-
-private:
-    static bool create_gguf_from_sequences(const char* path, const std::vector<std::vector<int32_t>>& sequences) {
-        // This is a simplified GGUF creation - in practice would use gguf_context
-        // For now, create a minimal valid GGUF file structure
-        std::ofstream file(path, std::ios::binary);
-        if (!file.is_open()) {
-            return false;
-        }
-
-        // Write GGUF magic number
-        const char magic[] = "GGUF";
-        file.write(magic, 4);
-
-        // Write version (placeholder)
-        uint32_t version = 3;
-        file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-
-        // Write tensor count
-        uint64_t tensor_count = sequences.size();
-        file.write(reinterpret_cast<const char*>(&tensor_count), sizeof(tensor_count));
-
-        // Write metadata count (minimal)
-        uint64_t metadata_count = 1;
-        file.write(reinterpret_cast<const char*>(&metadata_count), sizeof(metadata_count));
-
-        file.close();
-        return true;
-    }
-};
-
-// Helper function to compare datasets for exact equality
-bool compare_datasets_exact(struct llama_dataset* ds1, struct llama_dataset* ds2);
-bool compare_datasets_exact(struct llama_dataset* ds1, struct llama_dataset* ds2) {
-    if (!ds1 || !ds2) {
-        LLAMA_LOG_ERROR("One or both datasets are null\n");
-        return false;
-    }
-
-    // Compare sequence counts
-    uint64_t count1 = llama_dataset_n_sequences(ds1);
-    uint64_t count2 = llama_dataset_n_sequences(ds2);
-
-    if (count1 != count2) {
-        LLAMA_LOG_ERROR("Sequence counts differ: %lu vs %lu\n", count1, count2);
-        return false;
-    }
-
-    LLAMA_LOG_INFO("  Comparing %lu sequences...\n", count1);
-
-    // Compare each sequence
-    for (uint64_t i = 0; i < count1; i++) {
-        int32_t len1 = llama_dataset_sequence_length(ds1, i);
-        int32_t len2 = llama_dataset_sequence_length(ds2, i);
-
-        if (len1 != len2) {
-            LLAMA_LOG_ERROR("Sequence %lu lengths differ: %d vs %d\n", i, len1, len2);
-            return false;
-        }
-
-        const int32_t* seq1 = llama_dataset_sequence(ds1, i);
-        const int32_t* seq2 = llama_dataset_sequence(ds2, i);
-
-        if (!seq1 || !seq2) {
-            LLAMA_LOG_ERROR("Sequence %lu data is null\n", i);
-            return false;
-        }
-
-        for (int32_t j = 0; j < len1; j++) {
-            if (seq1[j] != seq2[j]) {
-                LLAMA_LOG_ERROR("Sequence %lu data differs at position %d: %d vs %d\n", i, j, seq1[j], seq2[j]);
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-
-// Memory usage tracker
-class MemoryTracker {
-private:
-    size_t initial_memory;
-
-public:
-    MemoryTracker() {
-        initial_memory = get_memory_usage();
-    }
-
-    size_t get_current_usage() const {
-        return get_memory_usage();
-    }
-
-    size_t get_delta() const {
-        return get_memory_usage() - initial_memory;
-    }
-
-private:
-    size_t get_memory_usage() const {
-        // Simple memory usage estimation - in practice would use more sophisticated methods
-        FILE* file = fopen("/proc/self/status", "r");
-        if (!file) return 0;
-
-        char line[128];
-        size_t vm_rss = 0;
-
-        while (fgets(line, sizeof(line), file)) {
-            if (strncmp(line, "VmRSS:", 6) == 0) {
-                sscanf(line, "VmRSS: %zu kB", &vm_rss);
-                break;
-            }
-        }
-
-        fclose(file);
-        return vm_rss * 1024; // Convert to bytes
-    }
-};
-
-// Performance timer
-class Timer {
-private:
-    std::chrono::high_resolution_clock::time_point start_time;
-
-public:
-    Timer() {
-        start();
-    }
-
-    void start() {
-        start_time = std::chrono::high_resolution_clock::now();
-    }
-
-    double elapsed_ms() const {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        return duration.count() / 1000.0;
-    }
-};
+// TestMemoryTracker and TestTimer are now available from the shared header
 
 // Test end-to-end workflow: load → access → convert → save → reload
 void test_end_to_end_workflow();
@@ -207,7 +17,7 @@ void test_end_to_end_workflow() {
 
     // Step 1: Load original dataset
     LLAMA_LOG_INFO("Step 1: Loading original dataset...\n");
-    Timer timer;
+    TestTimer timer;
     common_params params;
     params.in_files.push_back(original_file);
     struct llama_dataset* original = llama_dataset_from_gguf(&params);
@@ -321,7 +131,7 @@ void test_memory_usage_validation() {
 
     // Test non-streaming mode memory usage
     LLAMA_LOG_INFO("Testing non-streaming mode memory usage...\n");
-    MemoryTracker non_streaming_tracker;
+    TestMemoryTracker non_streaming_tracker;
 
     common_params params;
     params.in_files.push_back(test_file);
@@ -347,7 +157,7 @@ void test_memory_usage_validation() {
 
     // Test streaming mode memory usage
     LLAMA_LOG_INFO("Testing streaming mode memory usage...\n");
-    MemoryTracker streaming_tracker;
+    TestMemoryTracker streaming_tracker;
     params.in_files.back() = test_file;
     params.dataset_streaming = true;
     struct llama_dataset* streaming = llama_dataset_load_gguf(&params);
@@ -428,8 +238,8 @@ void test_performance_comparison() {
     LLAMA_LOG_INFO("---------------------------------------------------------------\n");
 
     for (const auto& test_case : test_cases) {
-        Timer timer;
-        MemoryTracker memory_tracker;
+        TestTimer timer;
+        TestMemoryTracker memory_tracker;
 
         // Test loading time
         timer.start();
@@ -442,7 +252,8 @@ void test_performance_comparison() {
             continue;
         }
 
-        size_t load_memory = memory_tracker.get_delta() / 1024; // Convert to KB
+        size_t load_memory = memory_tracker.get_delta_kb();
+        (void)load_memory; // Variable used for debugging/profiling, suppress warning
 
         // Test access time (access all sequences)
         timer.start();
@@ -454,7 +265,7 @@ void test_performance_comparison() {
         }
         double access_time = timer.elapsed_ms();
 
-        size_t total_memory = memory_tracker.get_delta() / 1024; // Convert to KB
+        size_t total_memory = memory_tracker.get_delta_kb();
 
         LLAMA_LOG_INFO("%s, %f \t\t%%s %f \t\t%%s %lu \t\t%%s\n",test_case.format, load_time, access_time, total_memory);
 
@@ -559,15 +370,15 @@ void test_large_dataset_handling() {
 
     // Test large text file if available
     LLAMA_LOG_INFO("Testing large text dataset...\n");
-    Timer timer;
-    MemoryTracker memory_tracker;
+    TestTimer timer;
+    TestMemoryTracker memory_tracker;
 
     common_params params;
     params.in_files.push_back(large_text_file);
     struct llama_dataset* large_text = llama_dataset_from_txt(&params, nullptr);
     if (large_text) {
         double load_time = timer.elapsed_ms();
-        size_t memory_usage = memory_tracker.get_delta() / 1024; // KB
+        size_t memory_usage = memory_tracker.get_delta_kb();
 
         uint64_t seq_count = llama_dataset_n_sequences(large_text);
         LLAMA_LOG_INFO("  Large text dataset loaded successfully\n");
@@ -584,6 +395,7 @@ void test_large_dataset_handling() {
                 const int32_t* data = llama_dataset_sequence(large_text, idx);
                 assert(len > 0);
                 assert(data != nullptr);
+                (void)len; (void)data; // Suppress unused variable warnings
             }
             double access_time = timer.elapsed_ms();
             LLAMA_LOG_INFO("  Random access time (10 sequences): %f ms\n", access_time);
@@ -598,13 +410,13 @@ void test_large_dataset_handling() {
     // Test large Parquet file if available
     LLAMA_LOG_INFO("Testing large Parquet dataset...\n");
     timer.start();
-    memory_tracker = MemoryTracker();
+    memory_tracker = TestMemoryTracker();
     params.in_files.back() = large_parquet_file;
 #ifdef LLAMA_PARQUET
     struct llama_dataset* large_parquet = llama_dataset_from_parquet(&params);
     if (large_parquet) {
         double load_time = timer.elapsed_ms();
-        size_t memory_usage = memory_tracker.get_delta() / 1024; // KB
+        size_t memory_usage = memory_tracker.get_delta_kb();
 
         uint64_t seq_count = llama_dataset_n_sequences(large_parquet);
         LLAMA_LOG_INFO("  Large Parquet dataset loaded successfully\n");

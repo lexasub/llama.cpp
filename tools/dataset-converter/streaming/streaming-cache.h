@@ -33,6 +33,11 @@ public:
         ADAPTIVE
     };
 
+    enum class CacheEntryType {
+        TENSOR_DATA,
+        TOKENIZED_SEQUENCE
+    };
+
     struct CacheStats {
         size_t current_memory = 0;
         size_t max_memory = 0;
@@ -42,6 +47,8 @@ public:
         size_t evictions = 0;
         size_t accesses = 0;
         double hit_ratio = 0.0;
+        size_t tokenized_entries = 0;
+        size_t tensor_entries = 0;
     };
 
     explicit llama_dataset_streaming_cache(size_t max_memory)
@@ -78,6 +85,13 @@ public:
     void * get(uint64_t sequence_id);
 
     void put(uint64_t sequence_id, void * data, size_t size);
+
+    // Tokenization-specific cache methods
+    void * get_tokenized(uint64_t sequence_id);
+    
+    void put_tokenized(uint64_t sequence_id, const std::vector<int32_t> & tokens);
+    
+    bool has_tokenized(uint64_t sequence_id) const;
 
     void remove(uint64_t sequence_id);
 

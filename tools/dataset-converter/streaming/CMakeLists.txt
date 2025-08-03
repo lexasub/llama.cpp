@@ -34,10 +34,16 @@ target_include_directories(dataset_streaming PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
 )
 
+# Find threading support if not already found
+if(NOT TARGET Threads::Threads)
+    find_package(Threads REQUIRED)
+endif()
+
 # Link core dependencies
 target_link_libraries(dataset_streaming PRIVATE
     llama
     ggml
+    ggml-base
     Threads::Threads
 )
 

@@ -1,3 +1,77 @@
+/**
+ * @file llama-dataset-parquet-core.cpp
+ * @brief Core Parquet dataset functionality implementation for llama.cpp
+ *
+ * This module provides the core implementation for loading and processing Parquet datasets
+ * within the llama.cpp ecosystem. It serves as the central hub for Parquet file operations,
+ * integrating Apache Arrow for efficient columnar data processing and providing seamless
+ * conversion between Parquet format and llama's internal dataset representation.
+ *
+ * ## Key Responsibilities
+ *
+ * ### Parquet File Loading and Parsing
+ * - Opens and validates Parquet files using Apache Arrow's Parquet reader
+ * - Handles file I/O operations with comprehensive error checking
+ * - Supports both streaming and non-streaming dataset loading modes
+ * - Manages memory-efficient access to large Parquet files
+ *
+ * ### Apache Arrow Integration
+ * - Utilizes Arrow's columnar memory format for efficient data processing
+ * - Integrates with Arrow's type system for schema validation and conversion
+ * - Leverages Arrow's memory pool for optimized memory management
+ * - Provides seamless conversion between Arrow tables and llama datasets
+ *
+ * ### Schema Analysis and Validation
+ * - Analyzes Parquet schemas to identify text and token columns
+ * - Validates column types and data formats for compatibility
+ * - Supports mixed content datasets with both text and pre-tokenized data
+ * - Provides detailed schema information for downstream processing
+ *
+ * ### Tokenization Engine Integration
+ * - Implements efficient text-to-token conversion using llama tokenizer
+ * - Provides caching mechanisms for improved tokenization performance
+ * - Supports batch tokenization for processing multiple text entries
+ * - Manages tokenization context and memory resources
+ *
+ * ### Data Conversion and Processing
+ * - Converts Parquet columnar data to GGUF tensor format
+ * - Handles different data types including integers, floats, and strings
+ * - Implements efficient data extraction and transformation algorithms
+ * - Supports both text and pre-tokenized data processing workflows
+ *
+ * ## Architecture Integration
+ *
+ * This module integrates with several other components:
+ * - **Schema Module**: Delegates detailed schema analysis operations
+ * - **Conversion Module**: Handles data type conversion and transformation
+ * - **Streaming Module**: Provides streaming support for large datasets
+ * - **Core Dataset**: Integrates with the main dataset infrastructure
+ *
+ * ## Performance Considerations
+ *
+ * - Uses Apache Arrow's zero-copy operations where possible
+ * - Implements efficient memory management with shared pointers
+ * - Provides configurable caching for tokenization operations
+ * - Supports lazy loading and streaming for memory efficiency
+ *
+ * ## Error Handling
+ *
+ * Comprehensive error handling covers:
+ * - File I/O errors and invalid file paths
+ * - Schema validation failures and type mismatches
+ * - Memory allocation failures and resource exhaustion
+ * - Arrow/Parquet library errors with detailed error messages
+ *
+ * @author llama.cpp contributors
+ * @version 1.0
+ * @date 2024
+ *
+ * @see llama-dataset-parquet.h for public interface definitions
+ * @see llama-dataset-parquet-schema.cpp for schema analysis implementation
+ * @see llama-dataset-parquet-conversion.cpp for data conversion implementation
+ * @see llama-dataset-parquet-streaming.cpp for streaming implementation
+ */
+
 #include "llama-model.h"
 #ifdef LLAMA_PARQUET
 #include "llama-dataset-parquet.h"
@@ -37,6 +111,48 @@
 bool llama_dataset_validate_parquet_schema(const char * path, struct parquet_schema_info * info);
 /**
  * @brief Load a dataset from a Parquet file (internal implementation).
+ *
+ * This function provides the core implementation for loading Parquet datasets,
+ * handling all aspects of file parsing, schema analysis, and data conversion.
+ * It integrates with Apache Arrow for efficient columnar data processing and
+ * supports both streaming and non-streaming modes.
+ *
+ * ## Processing Pipeline
+ *
+ * 1. **File Validation**: Verifies file existence and accessibility
+ * 2. **Arrow Integration**: Opens file using Arrow's Parquet reader
+ * 3. **Schema Analysis**: Analyzes column types and mixed content support
+ * 4. **Tokenization Setup**: Initializes tokenization engine if needed
+ * 5. **Data Conversion**: Converts Parquet data to GGUF tensor format
+ * 6. **Caching**: Sets up tensor caching for efficient access
+ *
+ * ## Apache Arrow Integration Details
+ *
+ * - Uses Arrow's ReadableFile for efficient I/O operations
+ * - Leverages Arrow's memory pool for optimized memory management
+ * - Utilizes Arrow's Table abstraction for columnar data access
+ * - Integrates with Arrow's type system for schema validation
+ *
+ * ## Error Handling
+ *
+ * Comprehensive error handling includes:
+ * - File not found or access permission errors
+ * - Invalid Parquet format or corrupted files
+ * - Schema validation failures and type mismatches
+ * - Memory allocation failures during processing
+ * - Arrow library errors with detailed status messages
+ *
+ * @param params Dataset loading parameters including file path, streaming options,
+ *               column preferences, and tokenization settings
+ * @return Pointer to loaded dataset on success, nullptr on failure
+ *         (error details available via llama_dataset_get_error())
+ *
+ * @note This function allocates significant memory for large datasets.
+ *       Consider using streaming mode for memory-constrained environments.
+ *
+ * @see llama_dataset_load_parquet() for public interface
+ * @see analyze_parquet_table_schema() for schema analysis details
+ * @see llama_dataset_create_gguf_from_parquet() for conversion details
  */
 struct llama_dataset * llama_dataset_load_parquet_internal(const common_params * params) {
     if (params->in_files.empty()) {
@@ -213,6 +329,47 @@ void llama_dataset_free_parquet_format_data(void * format_data) {
 
 /**
  * @brief Validate Parquet file schema for dataset compatibility.
+ *
+ * This function performs comprehensive validation of a Parquet file's schema
+ * to ensure compatibility with llama's dataset requirements. It checks column
+ * types, data formats, and structural requirements using Apache Arrow's
+ * schema introspection capabilities.
+ *
+ * ## Validation Process
+ *
+ * 1. **File Access**: Opens file using Arrow's I/O subsystem
+ * 2. **Reader Creation**: Initializes Parquet reader with error checking
+ * 3. **Schema Extraction**: Retrieves schema metadata from file headers
+ * 4. **Type Validation**: Validates column types against expected formats
+ * 5. **Structure Analysis**: Checks for required columns and data organization
+ *
+ * ## Supported Column Types
+ *
+ * - **INT32**: Single integer values or token IDs
+ * - **LIST<INT32>**: Arrays of token sequences (most common)
+ * - **STRING**: Text data for tokenization
+ * - **BINARY**: Raw binary data (limited support)
+ *
+ * ## Apache Arrow Integration
+ *
+ * - Uses Arrow's Schema class for type introspection
+ * - Leverages Arrow's Type system for validation
+ * - Integrates with Arrow's error handling mechanisms
+ * - Utilizes Arrow's memory pool for temporary operations
+ *
+ * @param path Path to the Parquet file to validate
+ * @param info Optional pointer to store detailed schema analysis results.
+ *             If provided, will be populated with column information,
+ *             mixed content detection, and primary column indices.
+ *             Can be nullptr if only validation result is needed.
+ * @return true if schema is valid and compatible, false otherwise
+ *         (error details available via llama_dataset_get_error())
+ *
+ * @note This function only validates schema structure, not data content.
+ *       For full data validation, use the validation module functions.
+ *
+ * @see analyze_parquet_table_schema() for detailed schema analysis
+ * @see parquet_schema_info for schema information structure
  */
 bool llama_dataset_validate_parquet_schema(const char * path, struct parquet_schema_info * info) {
     if (!path) {
@@ -281,6 +438,46 @@ bool llama_dataset_validate_parquet_schema(const char * path, struct parquet_sch
 
 /**
  * @brief Get Parquet file metadata for dataset information.
+ *
+ * This function extracts essential metadata from a Parquet file without
+ * loading the full dataset, providing efficient access to file statistics
+ * and structural information. It uses Apache Arrow's metadata APIs for
+ * fast header-only operations.
+ *
+ * ## Metadata Extraction Process
+ *
+ * 1. **File Opening**: Opens file using Arrow's ReadableFile interface
+ * 2. **Reader Creation**: Creates Parquet reader for metadata access
+ * 3. **Metadata Retrieval**: Extracts file-level metadata from headers
+ * 4. **Statistics Calculation**: Computes sequence count and length estimates
+ *
+ * ## Apache Arrow Integration
+ *
+ * - Uses Arrow's FileMetaData for efficient header access
+ * - Leverages Arrow's RowGroup metadata for statistics
+ * - Integrates with Arrow's I/O subsystem for file operations
+ * - Utilizes Arrow's error handling for robust operation
+ *
+ * ## Performance Characteristics
+ *
+ * - **Fast Operation**: Only reads file headers, not data content
+ * - **Memory Efficient**: Minimal memory allocation for metadata
+ * - **I/O Optimized**: Single file access for all metadata
+ * - **Error Resilient**: Handles corrupted or incomplete files gracefully
+ *
+ * @param path Path to the Parquet file to analyze
+ * @param n_sequences Output parameter for number of sequences (rows) in file.
+ *                    Set to 0 on error. Represents total number of data records.
+ * @param max_length Output parameter for estimated maximum sequence length.
+ *                   Set to default value (2048) as actual calculation requires
+ *                   data scanning. For precise values, load the full dataset.
+ * @return true if metadata extraction successful, false on error
+ *         (error details available via llama_dataset_get_error())
+ *
+ * @note max_length is currently estimated as data scanning is expensive.
+ *       For precise length information, consider loading the dataset.
+ *
+ * @see llama_dataset_load_parquet_internal() for full dataset loading
  */
 bool llama_dataset_get_parquet_metadata(const char * path, uint64_t * n_sequences, int32_t * max_length) {
     if (!path || !n_sequences || !max_length) {
@@ -333,6 +530,41 @@ bool llama_dataset_get_parquet_metadata(const char * path, uint64_t * n_sequence
 
 /**
  * @brief Constructor with llama model integration.
+ *
+ * Initializes the tokenization engine with a llama model, creating the
+ * necessary context for text-to-token conversion operations. This constructor
+ * sets up caching mechanisms, performance monitoring, and resource management
+ * for efficient tokenization of Parquet text data.
+ *
+ * ## Initialization Process
+ *
+ * 1. **Model Validation**: Verifies model pointer and compatibility
+ * 2. **Context Creation**: Initializes llama context with tokenization parameters
+ * 3. **Cache Setup**: Configures LRU cache with default size limits
+ * 4. **Statistics Initialization**: Sets up performance monitoring counters
+ *
+ * ## Context Configuration
+ *
+ * - **Context Size**: 2048 tokens for tokenization operations
+ * - **Batch Size**: Single sequence processing for thread safety
+ * - **Threading**: Single-threaded operation for consistency
+ * - **Embeddings**: Disabled for tokenization-only operations
+ *
+ * ## Memory Management
+ *
+ * - **Cache Size**: Default 256MB for tokenization cache
+ * - **Resource Ownership**: Manages context lifecycle automatically
+ * - **Memory Monitoring**: Tracks cache usage and performance metrics
+ *
+ * @param model Pointer to initialized llama model for tokenization.
+ *              Must not be null and must remain valid for tokenizer lifetime.
+ *              The tokenizer does not take ownership of the model.
+ *
+ * @note The constructor may fail if context creation fails. Check is_valid()
+ *       after construction to verify successful initialization.
+ *
+ * @see is_valid() to check initialization success
+ * @see set_cache_size() to configure cache memory limits
  */
 llama_dataset_parquet_tokenizer::llama_dataset_parquet_tokenizer(struct llama_model * model)
     : model_(model)
@@ -382,6 +614,46 @@ llama_dataset_parquet_tokenizer::~llama_dataset_parquet_tokenizer() {
 
 /**
  * @brief Convert text to tokens using llama tokenizer.
+ *
+ * This function performs text-to-token conversion using the llama tokenizer
+ * with intelligent caching for improved performance. It implements a complete
+ * tokenization pipeline including cache management, error handling, and
+ * performance monitoring.
+ *
+ * ## Tokenization Pipeline
+ *
+ * 1. **Cache Lookup**: Checks if text has been tokenized before
+ * 2. **Cache Hit**: Returns cached tokens immediately if found
+ * 3. **Cache Miss**: Performs tokenization using llama tokenizer
+ * 4. **Cache Update**: Stores result in cache with LRU management
+ * 5. **Statistics Update**: Updates performance counters and metrics
+ *
+ * ## Caching Strategy
+ *
+ * - **LRU Eviction**: Removes least recently used entries when cache is full
+ * - **Memory Monitoring**: Tracks cache size and enforces limits
+ * - **Performance Tracking**: Monitors hit/miss ratios for optimization
+ * - **Automatic Cleanup**: Evicts entries to maintain memory constraints
+ *
+ * ## Tokenization Details
+ *
+ * - **BOS Token**: Adds beginning-of-sequence token by default
+ * - **Special Tokens**: Handles special tokens according to model configuration
+ * - **Error Recovery**: Graceful handling of tokenization failures
+ * - **Memory Safety**: Proper buffer management for token arrays
+ *
+ * @param text Input text string to tokenize. Can be empty (returns empty vector).
+ *             Text encoding should be UTF-8 compatible.
+ * @return Vector of token IDs representing the input text.
+ *         Empty vector on error or for empty input text.
+ *         Token IDs are model-specific and suitable for llama processing.
+ *
+ * @note This function is thread-safe for read operations but not for
+ *       concurrent cache modifications. Use external synchronization
+ *       if calling from multiple threads.
+ *
+ * @see tokenize_batch() for efficient batch processing
+ * @see get_cache_hit_ratio() for performance monitoring
  */
 std::vector<int32_t> llama_dataset_parquet_tokenizer::tokenize_text(const std::string & text) {
     if (!is_valid()) {
@@ -529,6 +801,45 @@ void llama_dataset_parquet_tokenizer::evict_cache_entries(size_t target_size) {
 
 /**
  * @brief Internal tokenization implementation.
+ *
+ * This function provides the core tokenization logic using llama's vocabulary
+ * and tokenization algorithms. It handles the low-level details of converting
+ * text strings to token sequences, including buffer management, error handling,
+ * and integration with llama's tokenization APIs.
+ *
+ * ## Tokenization Process
+ *
+ * 1. **Buffer Allocation**: Estimates and allocates token buffer
+ * 2. **Tokenization Call**: Invokes llama tokenizer with proper parameters
+ * 3. **Error Checking**: Validates tokenization results and buffer sizes
+ * 4. **Buffer Resizing**: Adjusts output vector to actual token count
+ * 5. **Result Validation**: Ensures tokenization completed successfully
+ *
+ * ## Llama Integration Details
+ *
+ * - **Vocabulary Access**: Uses model's vocabulary for tokenization
+ * - **BOS Token**: Adds beginning-of-sequence token as configured
+ * - **Special Tokens**: Handles special tokens according to model settings
+ * - **Buffer Management**: Manages token buffer allocation and sizing
+ *
+ * ## Error Handling
+ *
+ * - **Buffer Overflow**: Detects and reports insufficient buffer space
+ * - **Tokenization Failure**: Handles tokenizer errors gracefully
+ * - **Memory Issues**: Manages allocation failures and cleanup
+ * - **Invalid Input**: Validates text input and model state
+ *
+ * @param text Input text string to tokenize (UTF-8 encoded)
+ * @param tokens Output vector to store resulting token IDs.
+ *               Vector is cleared before tokenization and resized to fit results.
+ * @return true if tokenization successful, false on error
+ *         (tokens vector will be empty on failure)
+ *
+ * @note This is an internal function and should not be called directly.
+ *       Use tokenize_text() for public tokenization interface.
+ *
+ * @see tokenize_text() for public tokenization interface
+ * @see llama_tokenize() for underlying tokenization function
  */
 bool llama_dataset_parquet_tokenizer::tokenize_internal(const std::string & text, std::vector<int32_t> & tokens) {
     if (!ctx_ || !model_) {

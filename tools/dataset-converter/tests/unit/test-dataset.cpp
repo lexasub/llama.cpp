@@ -18,6 +18,8 @@ int main() {
     const char * error = llama_dataset_get_error();
     assert(error != nullptr);
     assert(strstr(error, "null") != nullptr);
+    (void)dataset; // Suppress unused variable warning in release builds
+    (void)error;   // Suppress unused variable warning in release builds
     printf("✓ Null path error handling works\n");
 
     // Test error handling with non-existent file

@@ -1,8 +1,4 @@
-#include <cassert>
-#include <iostream>
-
-#include "common.h"
-#include "llama-dataset.h"
+#include "../unit/test_core_functionality.h"
 
 /**
  * Test for GGUF streaming support.

@@ -1,4 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
+project(dataset-converter)
+
+# Find required packages
+find_package(Threads REQUIRED)
 
 # Option to control the build of the dataset-converter tool
 option(PROJECT_BUILD_DATASET_CONVERTER "Build the dataset-converter tool" ON)

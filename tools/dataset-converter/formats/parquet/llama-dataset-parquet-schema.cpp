@@ -1,15 +1,96 @@
 /**
  * @file llama-dataset-parquet-schema.cpp
- * @brief Parquet schema analysis functionality for dataset converter.
+ * @brief Parquet schema analysis implementation for dataset converter.
  *
- * This module handles schema analysis for Parquet files, including:
- * - Column type detection (text vs token columns)
- * - Mixed content analysis
- * - Schema validation and metadata extraction
- * - Primary column identification
+ * This module provides comprehensive schema analysis functionality for Parquet files,
+ * enabling intelligent detection and processing of different data types within
+ * Parquet datasets. It serves as a critical component in the dataset converter's
+ * ability to handle heterogeneous data formats and mixed content scenarios.
  *
- * The functions in this module are used to analyze Parquet file schemas
- * and determine the best approach for loading and processing the data.
+ * ## Core Responsibilities
+ *
+ * ### Schema Analysis and Validation
+ * - Analyzes Parquet file schemas using Apache Arrow metadata
+ * - Validates schema compatibility with dataset converter requirements
+ * - Detects column data types and their suitability for different processing paths
+ * - Provides detailed schema information for optimization decisions
+ *
+ * ### Column Type Detection
+ * - Identifies text columns containing natural language data requiring tokenization
+ * - Detects pre-tokenized columns with integer arrays or token ID sequences
+ * - Distinguishes between different Arrow data types (STRING, BINARY, INT32, LIST)
+ * - Supports complex nested types like lists of integers for token sequences
+ *
+ * ### Mixed Content Support
+ * - Handles datasets containing both text and pre-tokenized data
+ * - Implements intelligent column selection algorithms for optimal processing
+ * - Provides fallback mechanisms when preferred columns are not available
+ * - Enables flexible data processing workflows for diverse dataset structures
+ *
+ * ### Primary Column Identification
+ * - Uses heuristic algorithms to identify the most suitable columns for processing
+ * - Supports user-specified preferred columns with automatic fallback
+ * - Implements common naming convention recognition (text, content, tokens, etc.)
+ * - Provides robust column selection even in ambiguous scenarios
+ *
+ * ## Algorithm Details
+ *
+ * ### Schema Analysis Algorithm
+ * The schema analysis process follows a multi-stage approach:
+ * 1. **Schema Extraction**: Uses Apache Arrow to read Parquet metadata
+ * 2. **Type Classification**: Categorizes each column based on Arrow data types
+ * 3. **Heuristic Matching**: Applies naming conventions and user preferences
+ * 4. **Fallback Selection**: Chooses appropriate columns when preferences fail
+ * 5. **Validation**: Ensures selected columns meet processing requirements
+ *
+ * ### Column Type Detection
+ * Text columns are identified by:
+ * - Arrow types: STRING, LARGE_STRING, BINARY, LARGE_BINARY
+ * - Content analysis for ambiguous cases
+ * - Encoding validation for text data
+ *
+ * Token columns are identified by:
+ * - Arrow types: INT32 (single tokens), LIST<INT32> (token sequences)
+ * - Value range validation for token IDs
+ * - Sequence length analysis for token arrays
+ *
+ * ### Mixed Content Processing
+ * When both text and token columns are present:
+ * - Prioritizes user-specified preferences
+ * - Falls back to common naming conventions
+ * - Selects first available column of appropriate type
+ * - Provides metadata for informed processing decisions
+ *
+ * ## Integration with Dataset Converter
+ *
+ * This module integrates with other components:
+ * - **Core Dataset API**: Provides schema information for dataset loading
+ * - **Parquet Loader**: Supplies column selection for data extraction
+ * - **Streaming System**: Enables optimized column-based streaming
+ * - **Validation Framework**: Supports schema-based validation rules
+ *
+ * ## Performance Considerations
+ *
+ * - Minimal memory footprint during schema analysis
+ * - Efficient Arrow metadata processing without full data loading
+ * - Cached schema information to avoid repeated analysis
+ * - Optimized string handling for column name processing
+ *
+ * ## Error Handling
+ *
+ * Comprehensive error handling covers:
+ * - Invalid Parquet files or corrupted metadata
+ * - Unsupported Arrow data types
+ * - Memory allocation failures
+ * - Missing or ambiguous column specifications
+ *
+ * @author Dataset Converter Team
+ * @version 1.0
+ * @since Dataset Converter v2.0
+ *
+ * @see llama-dataset-parquet.h for public API
+ * @see llama-dataset-parquet-internal.h for internal structures
+ * @see llama-dataset-parquet-core.cpp for data loading implementation
  */
 
 #ifdef LLAMA_PARQUET
@@ -38,12 +119,30 @@
 /**
  * @brief Check if a column contains text data based on its type.
  *
- * This function examines an Arrow data type to determine if it represents
- * text data that needs to be tokenized. Text columns typically contain
- * string or binary data that represents natural language text.
+ * This function implements the core type detection algorithm for identifying
+ * text columns in Parquet schemas. It examines Arrow data types to determine
+ * if they represent textual data that requires tokenization processing.
  *
- * @param field_type Arrow data type to check
- * @return true if the column contains text data, false otherwise
+ * The function recognizes the following Arrow types as text data:
+ * - STRING: Standard UTF-8 string data
+ * - LARGE_STRING: Large UTF-8 strings (>2GB support)
+ * - BINARY: Raw binary data that may contain text
+ * - LARGE_BINARY: Large binary data with potential text content
+ *
+ * This classification is essential for the dataset converter to determine
+ * the appropriate processing pipeline for each column. Text columns will
+ * be routed through the tokenization system, while other types follow
+ * different processing paths.
+ *
+ * @param field_type Arrow data type to analyze (must not be null)
+ * @return true if the column contains text data requiring tokenization,
+ *         false for non-text types or null input
+ *
+ * @note This function performs type-based classification only. Content-based
+ *       analysis may be needed for BINARY types in some cases.
+ *
+ * @see is_token_column_type() for token column detection
+ * @see analyze_parquet_table_schema() for comprehensive schema analysis
  */
 bool is_text_column_type(const std::shared_ptr<arrow::DataType> & field_type) {
     if (!field_type) {
@@ -64,12 +163,33 @@ bool is_text_column_type(const std::shared_ptr<arrow::DataType> & field_type) {
 /**
  * @brief Check if a column contains token data based on its type.
  *
- * This function examines an Arrow data type to determine if it represents
- * pre-tokenized data. Token columns typically contain integer arrays or
- * lists of integers representing token IDs.
+ * This function implements the token column detection algorithm for identifying
+ * pre-tokenized data in Parquet schemas. It analyzes Arrow data types to
+ * determine if they represent token sequences that can be used directly
+ * without additional tokenization.
  *
- * @param field_type Arrow data type to check
- * @return true if the column contains token data, false otherwise
+ * The function recognizes the following patterns as token data:
+ * - INT32: Single token values or scalar token IDs
+ * - LIST<INT32>: Arrays of token IDs representing tokenized sequences
+ *
+ * Token columns are valuable for performance optimization as they bypass
+ * the computationally expensive tokenization process. The dataset converter
+ * can load these columns directly and use them for training or inference.
+ *
+ * Algorithm details:
+ * 1. Check for direct INT32 type (single token per row)
+ * 2. For LIST types, verify the value type is INT32
+ * 3. Reject other numeric types (INT64, FLOAT, etc.) as non-token data
+ *
+ * @param field_type Arrow data type to analyze (must not be null)
+ * @return true if the column contains pre-tokenized data that can be used
+ *         directly, false for non-token types or null input
+ *
+ * @note Future versions may support additional token formats like INT64
+ *       or compressed token representations.
+ *
+ * @see is_text_column_type() for text column detection
+ * @see analyze_parquet_table_schema() for complete schema analysis
  */
 bool is_token_column_type(const std::shared_ptr<arrow::DataType> & field_type) {
     if (!field_type) {
@@ -92,11 +212,27 @@ bool is_token_column_type(const std::shared_ptr<arrow::DataType> & field_type) {
 /**
  * @brief Helper function to allocate and copy string to C-style string array.
  *
- * This utility function creates a C-style string copy of a C++ string,
- * which is needed for the C API compatibility in the schema info structure.
+ * This utility function provides safe string copying for C API compatibility,
+ * ensuring proper memory management when converting C++ strings to C-style
+ * strings for use in the parquet_schema_info structure.
  *
- * @param str C++ string to copy
- * @return Allocated C-style string, or NULL on allocation failure
+ * The function performs the following operations:
+ * 1. Allocates memory for the string plus null terminator
+ * 2. Copies the string content using strcpy for safety
+ * 3. Returns the allocated pointer for caller ownership
+ *
+ * Memory management:
+ * - Caller is responsible for freeing the returned pointer
+ * - Returns NULL on allocation failure for error handling
+ * - Safe to use with empty strings (allocates 1 byte for null terminator)
+ *
+ * @param str C++ string to copy (can be empty but not null reference)
+ * @return Newly allocated C-style string copy, or NULL on allocation failure
+ *
+ * @warning Caller must free the returned pointer to avoid memory leaks
+ * @note This function is used internally for schema info structure population
+ *
+ * @see parquet_schema_info_free() for proper cleanup of allocated strings
  */
 static char * copy_string_to_c(const std::string & str) {
     char * c_str = static_cast<char *>(malloc(str.length() + 1));
@@ -148,21 +284,91 @@ void parquet_schema_info_free(struct parquet_schema_info * info) {
 /**
  * @brief Analyze Parquet table schema for mixed content support (C++ version).
  *
- * This function performs a comprehensive analysis of a Parquet table's schema
- * to identify text and token columns, determine primary columns for processing,
- * and detect mixed content scenarios where both text and pre-tokenized data
- * are present in the same file.
+ * This function implements the core schema analysis algorithm that performs
+ * comprehensive examination of Parquet table schemas to enable intelligent
+ * data processing. It serves as the primary entry point for schema analysis
+ * within the C++ implementation layer.
  *
- * The function uses heuristics to identify the most appropriate columns:
- * - Preferred columns specified by the user take priority
- * - Common column names are used as fallbacks (text, content, tokens, etc.)
- * - First available column of the appropriate type is used as last resort
+ * ## Algorithm Overview
  *
- * @param table Arrow table to analyze
+ * The analysis follows a sophisticated multi-stage process:
+ *
+ * ### Stage 1: Schema Extraction and Validation
+ * - Extracts Arrow schema from the table
+ * - Validates schema structure and field accessibility
+ * - Initializes analysis state and result structures
+ *
+ * ### Stage 2: Column Classification
+ * - Iterates through all schema fields
+ * - Applies type detection algorithms for each column
+ * - Categorizes columns as text, token, or other types
+ * - Builds comprehensive column inventories
+ *
+ * ### Stage 3: Primary Column Selection
+ * The selection algorithm uses a priority-based approach:
+ * 1. **User Preferences**: Exact matches for specified column names
+ * 2. **Convention Matching**: Common names (text, content, tokens, input_ids)
+ * 3. **Type-Based Fallback**: First available column of appropriate type
+ * 4. **Index Assignment**: Maps selected columns to schema indices
+ *
+ * ### Stage 4: Mixed Content Detection
+ * - Analyzes the presence of both text and token columns
+ * - Sets mixed content flags for processing optimization
+ * - Provides metadata for adaptive processing strategies
+ *
+ * ### Stage 5: Result Population
+ * - Allocates C-compatible string arrays for column names
+ * - Populates the parquet_schema_info structure
+ * - Ensures proper memory management and error handling
+ *
+ * ## Heuristic Algorithms
+ *
+ * ### Text Column Heuristics
+ * Priority order for text column selection:
+ * 1. User-specified preferred_text_column
+ * 2. Columns named: "text", "content", "data", "input"
+ * 3. First STRING/BINARY type column found
+ *
+ * ### Token Column Heuristics
+ * Priority order for token column selection:
+ * 1. User-specified preferred_token_column
+ * 2. Columns named: "tokens", "token_ids", "input_ids", "data"
+ * 3. First INT32/LIST<INT32> type column found
+ *
+ * ## Performance Characteristics
+ *
+ * - Time Complexity: O(n) where n is the number of columns
+ * - Space Complexity: O(m) where m is the number of text/token columns
+ * - Memory allocation is minimized and error-safe
+ * - No data loading required, only metadata analysis
+ *
+ * ## Error Handling
+ *
+ * The function provides comprehensive error handling:
+ * - Validates all input parameters
+ * - Handles Arrow schema access failures
+ * - Manages memory allocation errors gracefully
+ * - Provides detailed error messages via llama_dataset_set_error
+ * - Ensures cleanup on failure paths
+ *
+ * @param table Arrow table to analyze (must not be null)
  * @param preferred_text_column Preferred text column name (empty for auto-detection)
  * @param preferred_token_column Preferred token column name (empty for auto-detection)
- * @param info Output structure for schema information
- * @return true on success, false on error
+ * @param info Output structure for schema information (must not be null)
+ * @return true on successful analysis, false on error
+ *
+ * @pre table must be a valid Arrow table with accessible schema
+ * @pre info must point to valid parquet_schema_info structure
+ * @post On success, info contains complete schema analysis results
+ * @post On failure, info is left in clean state and error is set
+ *
+ * @note This function allocates memory for column name arrays that must
+ *       be freed using parquet_schema_info_free()
+ *
+ * @see analyze_parquet_schema() for file-based analysis entry point
+ * @see is_text_column_type() for text column detection algorithm
+ * @see is_token_column_type() for token column detection algorithm
+ * @see parquet_schema_info_free() for proper cleanup
  */
 bool analyze_parquet_table_schema(
     const std::shared_ptr<arrow::Table> & table,
@@ -300,18 +506,114 @@ bool analyze_parquet_table_schema(
 /**
  * @brief Analyze Parquet file schema for mixed content support.
  *
- * This is the main entry point for schema analysis. It opens a Parquet file,
- * reads its schema, and performs comprehensive analysis to determine the
- * structure and content types of the columns.
+ * This function serves as the primary C API entry point for Parquet schema
+ * analysis, providing a complete file-to-analysis pipeline that handles all
+ * low-level operations required for schema examination. It orchestrates the
+ * entire analysis process from file access to result generation.
  *
- * This function handles all the low-level Arrow/Parquet operations and
- * delegates the actual analysis to analyze_parquet_table_schema().
+ * ## Implementation Architecture
  *
- * @param path Path to the Parquet file
- * @param preferred_text_column Preferred text column name (can be NULL)
- * @param preferred_token_column Preferred token column name (can be NULL)
- * @param info Pointer to store schema analysis results
- * @return true if analysis successful, false otherwise
+ * The function implements a layered architecture:
+ *
+ * ### Layer 1: File System Interface
+ * - Opens Parquet files using Arrow I/O subsystem
+ * - Handles file access permissions and availability
+ * - Provides robust error handling for file system issues
+ * - Supports various file system types (local, network, cloud)
+ *
+ * ### Layer 2: Parquet Reader Integration
+ * - Creates Arrow-based Parquet readers
+ * - Configures memory pools for efficient processing
+ * - Handles Parquet format validation and compatibility
+ * - Manages reader lifecycle and resource cleanup
+ *
+ * ### Layer 3: Table Loading and Validation
+ * - Loads Parquet metadata and schema information
+ * - Validates table structure and accessibility
+ * - Handles corrupted or incomplete files gracefully
+ * - Optimizes memory usage during schema extraction
+ *
+ * ### Layer 4: Analysis Delegation
+ * - Converts C API parameters to C++ equivalents
+ * - Delegates core analysis to analyze_parquet_table_schema()
+ * - Handles parameter validation and type conversion
+ * - Manages error propagation between layers
+ *
+ * ## Error Handling Strategy
+ *
+ * The function implements comprehensive error handling:
+ *
+ * ### File System Errors
+ * - File not found or access denied
+ * - Corrupted file system metadata
+ * - Network connectivity issues for remote files
+ * - Insufficient permissions for file access
+ *
+ * ### Format Errors
+ * - Invalid Parquet file format
+ * - Corrupted Parquet metadata
+ * - Unsupported Parquet features
+ * - Schema compatibility issues
+ *
+ * ### Memory Errors
+ * - Insufficient memory for table loading
+ * - Memory allocation failures
+ * - Resource exhaustion scenarios
+ * - Memory pool configuration issues
+ *
+ * ### API Errors
+ * - Invalid parameter combinations
+ * - Null pointer dereferences
+ * - Type conversion failures
+ * - Result structure initialization errors
+ *
+ * ## Performance Optimization
+ *
+ * The function is optimized for minimal resource usage:
+ * - Schema-only loading without full data access
+ * - Efficient memory pool utilization
+ * - Minimal temporary object creation
+ * - Fast-fail error detection
+ * - Resource cleanup on all exit paths
+ *
+ * ## Integration Points
+ *
+ * This function integrates with:
+ * - **Dataset Loading**: Provides schema info for optimized loading
+ * - **Validation System**: Supplies schema data for validation rules
+ * - **Streaming Engine**: Enables column-aware streaming strategies
+ * - **Caching System**: Supports schema-based cache optimization
+ *
+ * @param path Path to the Parquet file (must not be null)
+ * @param preferred_text_column Preferred text column name (can be NULL for auto-detection)
+ * @param preferred_token_column Preferred token column name (can be NULL for auto-detection)
+ * @param info Pointer to store schema analysis results (must not be null)
+ * @return true if analysis completed successfully, false on any error
+ *
+ * @pre path must point to a valid, accessible Parquet file
+ * @pre info must point to a valid parquet_schema_info structure
+ * @post On success, info contains complete schema analysis results
+ * @post On failure, info is left unmodified and error details are available
+ *
+ * @note This function may perform I/O operations and should be called
+ *       from appropriate contexts (not from signal handlers, etc.)
+ *
+ * @warning The function allocates memory for column name arrays that must
+ *          be freed using parquet_schema_info_free() to prevent memory leaks
+ *
+ * @see analyze_parquet_table_schema() for core analysis implementation
+ * @see llama_dataset_validate_parquet_schema() for schema validation
+ * @see parquet_schema_info_free() for proper result cleanup
+ *
+ * @example
+ * ```c
+ * struct parquet_schema_info info;
+ * if (analyze_parquet_schema("dataset.parquet", "text", "tokens", &info)) {
+ *     printf("Found %zu text columns, %zu token columns\n",
+ *            info.n_text_columns, info.n_token_columns);
+ *     parquet_schema_info_free(&info);
+ * }
+ * ```
  */
 bool analyze_parquet_schema(
     const char * path,
