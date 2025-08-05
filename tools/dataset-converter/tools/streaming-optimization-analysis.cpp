@@ -944,9 +944,30 @@ public:
  * @see StreamingOptimizer for detailed analysis implementation
  * @see StreamingOptimizationResult for result structure details
  */
-int main() {
+int main(int argc, char** argv) {
     std::cout << "Streaming Optimization Analysis Tool" << std::endl;
     std::cout << "====================================" << std::endl;
+
+    // Parse command-line arguments for dataset paths
+    std::vector<std::string> dataset_paths;
+    
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            dataset_paths.push_back(argv[i]);
+        }
+        std::cout << "Using provided dataset paths:" << std::endl;
+        for (const auto& path : dataset_paths) {
+            std::cout << "  " << path << std::endl;
+        }
+    } else {
+        // Use default paths if none provided
+        dataset_paths = {
+            "test_data/small_dataset.gguf",
+            "test_data/parquet_dataset.parquet",
+            "test_data/text_dataset.txt"
+        };
+        std::cout << "Using default dataset paths" << std::endl;
+    }
 
     StreamingOptimizer optimizer;
 

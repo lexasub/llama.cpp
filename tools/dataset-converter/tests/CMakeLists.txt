@@ -7,33 +7,10 @@ enable_testing()
 # Ensure all new test modules are properly discovered
 # New test modules created during refactoring:
 # - test_gguf_functionality.cpp (GGUF format tests)
-# - test_parquet_functionality.cpp (Parquet format tests) 
+# - test_parquet_functionality.cpp (Parquet format tests)
 # - test_streaming_functionality.cpp (Streaming tests)
 # - test_validation_functionality.cpp (Validation tests)
 message(STATUS "Configuring dataset converter test modules...")
-
-# Test data generation executables
-add_executable(create-test-data ${CMAKE_CURRENT_SOURCE_DIR}/data/create_test_data.cpp)
-target_link_libraries(create-test-data PRIVATE dataset_convert_lib common llama ggml)
-
-add_executable(create-test-data-gguf ${CMAKE_CURRENT_SOURCE_DIR}/data/create_test_gguf.cpp)
-target_link_libraries(create-test-data-gguf PRIVATE dataset_convert_lib common llama ggml)
-
-# Set output directory for test data generators
-set_target_properties(create-test-data create-test-data-gguf PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-# Custom target for test data generation
-add_custom_target(generate-test-data
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating test data..."
-    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/create-test-data
-    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/create-test-data-gguf
-    COMMAND ${CMAKE_COMMAND} -E echo "Test data generation completed"
-    DEPENDS create-test-data create-test-data-gguf
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating test data for dataset converter"
-)
 
 # Function to create monitored test execution
 function(add_monitored_test TEST_NAME TEST_EXECUTABLE)
@@ -102,19 +79,19 @@ function(add_test_target TEST_SRC)
     else()
         add_executable(${TARGET_NAME} ${TEST_SRC})
     endif()
-    
+
     target_link_libraries(${TARGET_NAME} PRIVATE dataset_convert_lib common llama ggml)
-    
+
     # Ensure proper linking for new test modules
     if(${TEST_SRC} MATCHES "test_.*_functionality\\.cpp")
         # Additional linking for functionality test modules
-        target_include_directories(${TARGET_NAME} PRIVATE 
+        target_include_directories(${TARGET_NAME} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../core
             ${CMAKE_CURRENT_SOURCE_DIR}/../formats
             ${CMAKE_CURRENT_SOURCE_DIR}/../streaming
             ${CMAKE_CURRENT_SOURCE_DIR}/../validation
         )
-        
+
         # Link format-specific libraries based on test type
         if(${TEST_SRC} MATCHES "parquet" AND LLAMA_PARQUET)
             target_link_libraries(${TARGET_NAME} PRIVATE dataset_parquet_format)
@@ -130,14 +107,9 @@ function(add_test_target TEST_SRC)
         NAME ${TARGET_NAME}
         COMMAND ${CMAKE_COMMAND}
             -DTEST_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}
-            -DCREATE_TEST_DATA=${CMAKE_CURRENT_BINARY_DIR}/create-test-data
-            -DCREATE_TEST_DATA_GGUF=${CMAKE_CURRENT_BINARY_DIR}/create-test-data-gguf
             -DWORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/run_dataset_test.cmake
     )
-
-    # Add dependency on test data generators
-    add_dependencies(${TARGET_NAME} create-test-data create-test-data-gguf)
 
     # Add monitored test target for this test
     add_monitored_test(${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME})
@@ -171,7 +143,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
     if(${TEST_SRC} MATCHES ".*_utils\\.cpp$")
         continue()
     endif()
-    
+
     # Skip Parquet tests if support is not available
     if(NOT LLAMA_PARQUET AND (${TEST_SRC} MATCHES "parquet" OR ${TEST_SRC} MATCHES "arrow"))
         continue()
@@ -235,7 +207,7 @@ add_custom_target(run-all-dataset-tests
 add_custom_target(verify-test-modules
     COMMAND ${CMAKE_COMMAND} -E echo "Verifying all test modules build correctly..."
     COMMAND ${CMAKE_COMMAND} -E echo "✅ test_gguf_functionality.cpp"
-    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_parquet_functionality.cpp" 
+    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_parquet_functionality.cpp"
     COMMAND ${CMAKE_COMMAND} -E echo "✅ test_streaming_functionality.cpp"
     COMMAND ${CMAKE_COMMAND} -E echo "✅ test_validation_functionality.cpp"
     COMMAND ${CMAKE_COMMAND} -E echo "All new test modules configured successfully"

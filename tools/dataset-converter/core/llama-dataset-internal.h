@@ -92,9 +92,9 @@
  *
  * This header should only be included by:
  * - Core implementation files (llama-dataset.cpp, llama-dataset-sequence.cpp)
- * - Format implementation files (gguf/*.cpp, text/*.cpp, parquet/*.cpp)
- * - Streaming implementation files (streaming/*.cpp)
- * - Validation implementation files (validation/*.cpp)
+ * - Format implementation files (gguf/\*.cpp, text/\*.cpp, parquet/\*.cpp)
+ * - Streaming implementation files (streaming/\*.cpp)
+ * - Validation implementation files (validation/\*.cpp)
  * - Internal utility implementations (llama-dataset-utils.cpp)
  *
  * **Important**: This header must never be included by:
@@ -106,11 +106,11 @@
  * ## Integration Points
  *
  * This module integrates with:
- * - **streaming/**: Provides cache and optimization manager instances
- * - **formats/**: Receives format-specific data and implementations
- * - **validation/**: Provides internal structure access for validation
- * - **platform/**: Uses platform-specific memory and threading primitives
- * - **core/**: Implements the public API defined in llama-dataset.h
+ * - **streaming: Provides cache and optimization manager instances
+ * - **formats: Receives format-specific data and implementations
+ * - **validation: Provides internal structure access for validation
+ * - **platform: Uses platform-specific memory and threading primitives
+ * - **core: Implements the public API defined in llama-dataset.h
  *
  * ## Future Extensibility
  *
@@ -202,18 +202,18 @@ struct llama_dataset {
     struct ggml_context * ggml_ctx;         ///< GGML tensor context (NULL in streaming mode for memory efficiency)
     struct ggml_tensor ** cached_tensors;   ///< Fast O(1) sequence access cache (array of n_seq pointers)
     uint64_t n_seq;                         ///< Total number of sequences (cached for performance)
-    
+
     // Format and Configuration
     enum dataset_type type;                 ///< Original format type (GGUF, text, Parquet)
     bool streaming;                         ///< Streaming mode flag (affects memory management strategy)
     void * format_data;                     ///< Format-specific state and configuration (opaque pointer)
-    
+
     // Tokenization Infrastructure
     // Used for text format and any format requiring tokenization services
     struct llama_model * model;             ///< Llama model for tokenization (shared or owned)
     struct llama_context * tokenizer_ctx;  ///< Dedicated tokenizer context (optimized for batch processing)
     bool owns_model;                        ///< Resource ownership flag (determines cleanup responsibility)
-    
+
     // Streaming and Optimization Infrastructure
     // C++ components for advanced streaming and optimization capabilities
 #ifdef __cplusplus

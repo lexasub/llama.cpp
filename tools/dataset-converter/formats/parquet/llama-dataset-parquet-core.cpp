@@ -226,8 +226,8 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const common_params *
         // Analyze schema for mixed content support
         if (!analyze_parquet_table_schema(
                 table,
-                params->dataset_text_column,
-                params->dataset_token_column,
+                params->dataset_column,
+                params->dataset_column_to,
                 &format_data->schema_info)) {
             // Error already set by analyze_parquet_table_schema
             llama_dataset_free(dataset);
@@ -242,7 +242,7 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const common_params *
             return nullptr;
         }
 
-        // Initialize tokenization engine if needed
+        // Initialize tokenization engine if needed (after model is attached)
         if (params->dataset_tokenize_text && dataset->model) {
             format_data->tokenizer = new llama_dataset_parquet_tokenizer(dataset->model);
             if (!format_data->tokenizer->is_valid()) {
@@ -255,10 +255,37 @@ struct llama_dataset * llama_dataset_load_parquet_internal(const common_params *
             format_data->tokenizer->set_cache_size(params->dataset_tokenization_cache_size);
             format_data->mixed_content = format_data->schema_info.has_mixed_content;
 
-            LLAMA_LOG_INFO("Tokenization engine initialized with %zu MB cache\n",
-                          params->dataset_tokenization_cache_size);
+            // Initialize on-demand tokenization state
+            format_data->tokenization_enabled = true;
+            format_data->cache_max_size = params->dataset_tokenization_cache_size * 1024 * 1024; // Convert MB to bytes
+            format_data->cache_memory_usage = 0;
+
+            // Set processing mode based on schema analysis
+            if (format_data->schema_info.has_mixed_content) {
+                format_data->processing_mode = PARQUET_MIXED_MODE;
+                format_data->prefer_tokens_over_text = true; // Prefer pre-tokenized data for performance
+            } else if (format_data->schema_info.primary_text_column_index >= 0) {
+                format_data->processing_mode = PARQUET_TEXT_MODE;
+                format_data->prefer_tokens_over_text = false;
+            } else if (format_data->schema_info.primary_token_column_index >= 0) {
+                format_data->processing_mode = PARQUET_TOKEN_MODE;
+                format_data->prefer_tokens_over_text = true;
+            } else {
+                format_data->processing_mode = PARQUET_TEXT_MODE; // Default fallback
+                format_data->prefer_tokens_over_text = false;
+            }
+
+            LLAMA_LOG_INFO("Tokenization engine initialized with %zu MB cache, mode=%d, prefer_tokens=%s\n",
+                          params->dataset_tokenization_cache_size,
+                          format_data->processing_mode,
+                          format_data->prefer_tokens_over_text ? "true" : "false");
         } else {
             format_data->tokenizer = nullptr;
+            format_data->tokenization_enabled = false;
+            format_data->processing_mode = PARQUET_TOKEN_MODE; // Assume pre-tokenized if no tokenizer
+            format_data->prefer_tokens_over_text = true;
+            format_data->cache_max_size = 0;
+            format_data->cache_memory_usage = 0;
         }
 
         // Create GGUF context from Parquet data
@@ -314,10 +341,13 @@ void llama_dataset_free_parquet_format_data(void * format_data) {
         data->tokenizer = nullptr;
     }
 
+    // Clear tokenization cache (tensors are managed by GGML context)
+    data->tokenized_cache.clear();
+    data->cache_access_order.clear();
+
     // Clear vectors
     data->text_columns.clear();
     data->token_columns.clear();
-    data->tokenized_cache.clear();
 
     // Arrow/Parquet objects are automatically cleaned up by shared_ptr
     data->table.reset();
@@ -868,6 +898,341 @@ bool llama_dataset_parquet_tokenizer::tokenize_internal(const std::string & text
     tokens.resize(n_tokens);
 
     return true;
+}
+
+/**
+ * @brief Load and tokenize a Parquet sequence on-demand.
+ *
+ * This function provides the core on-demand tokenization functionality for
+ * Parquet datasets. It checks the tokenization cache first, and if the sequence
+ * is not cached, it determines the appropriate data source (text vs tokens),
+ * performs tokenization if needed, converts to GGML tensor format, and stores
+ * the result in the cache for future access.
+ *
+ * ## Processing Algorithm
+ *
+ * 1. **Cache Lookup**: Check if sequence is already cached as a tensor
+ * 2. **Content Detection**: Determine if row contains text or pre-tokenized data
+ * 3. **Data Extraction**: Extract data from appropriate column based on schema analysis
+ * 4. **Tokenization**: Convert text to tokens using llama tokenizer if needed
+ * 5. **Tensor Creation**: Convert token vectors to GGML tensor format
+ * 6. **Cache Storage**: Store result in tokenized_cache with LRU management
+ * 7. **Memory Management**: Handle cache eviction and memory pressure
+ *
+ * ## Mixed Content Handling
+ *
+ * The function intelligently handles datasets with both text and token columns:
+ * - Uses prefer_tokens_over_text to choose data source priority
+ * - Falls back to alternative column if primary source fails
+ * - Leverages schema analysis results for optimization
+ * - Provides graceful error recovery for tokenization failures
+ *
+ * @param dataset Dataset containing the Parquet data and tokenization context
+ * @param sequence_index Index of the sequence to load and tokenize
+ * @return Pointer to GGML tensor containing the tokenized sequence data,
+ *         or NULL on error (error details available via llama_dataset_get_error())
+ */
+struct ggml_tensor * load_parquet_sequence_with_tokenization(struct llama_dataset * dataset,
+                                                            uint64_t sequence_index) {
+    if (!dataset || !dataset->format_data) {
+        llama_dataset_set_error("Invalid dataset for sequence tokenization");
+        return nullptr;
+    }
+
+    auto * format_data = static_cast<struct parquet_format_data *>(dataset->format_data);
+    if (!format_data->table) {
+        llama_dataset_set_error("No Parquet table available for tokenization");
+        return nullptr;
+    }
+
+    // Check cache first
+    auto cache_it = format_data->tokenized_cache.find(sequence_index);
+    if (cache_it != format_data->tokenized_cache.end()) {
+        // Update access order for LRU
+        update_cache_access_order(format_data, sequence_index);
+        return cache_it->second;
+    }
+
+    // Cache miss - need to load and tokenize the sequence
+    std::vector<int32_t> sequence_tokens;
+    bool sequence_processed = false;
+
+    // Check if sequence index is valid
+    if (sequence_index >= static_cast<uint64_t>(format_data->table->num_rows())) {
+        llama_dataset_set_error("Sequence index out of bounds");
+        return nullptr;
+    }
+
+    // Try to use pre-tokenized data first if available and preferred
+    if (format_data->prefer_tokens_over_text &&
+        format_data->schema_info.primary_token_column_index >= 0) {
+
+        auto token_column = format_data->table->column(format_data->schema_info.primary_token_column_index);
+
+        // Find the correct chunk and extract token data
+        uint64_t current_row = 0;
+        for (int chunk_idx = 0; chunk_idx < token_column->num_chunks(); chunk_idx++) {
+            auto chunk = token_column->chunk(chunk_idx);
+            uint64_t chunk_size = chunk->length();
+
+            if (sequence_index >= current_row && sequence_index < current_row + chunk_size) {
+                int64_t local_row = sequence_index - current_row;
+
+                if (chunk->type_id() == arrow::Type::LIST) {
+                    auto list_array = std::static_pointer_cast<arrow::ListArray>(chunk);
+
+                    if (!list_array->IsNull(local_row)) {
+                        auto slice = list_array->value_slice(local_row);
+                        if (llama_dataset_arrow_array_to_tokens(slice, sequence_tokens)) {
+                            sequence_processed = true;
+                            break;
+                        }
+                    }
+                } else if (chunk->type_id() == arrow::Type::INT32) {
+                    auto int32_array = std::static_pointer_cast<arrow::Int32Array>(chunk);
+
+                    if (!int32_array->IsNull(local_row)) {
+                        sequence_tokens.push_back(int32_array->Value(local_row));
+                        sequence_processed = true;
+                        break;
+                    }
+                }
+            }
+            current_row += chunk_size;
+        }
+    }
+
+    // If no tokenized data found or not preferred, try text tokenization
+    if (!sequence_processed && format_data->schema_info.primary_text_column_index >= 0 &&
+        format_data->tokenizer) {
+
+        auto text_column = format_data->table->column(format_data->schema_info.primary_text_column_index);
+
+        // Find the correct chunk and extract text data
+        uint64_t current_row = 0;
+        for (int chunk_idx = 0; chunk_idx < text_column->num_chunks(); chunk_idx++) {
+            auto chunk = text_column->chunk(chunk_idx);
+            uint64_t chunk_size = chunk->length();
+
+            if (sequence_index >= current_row && sequence_index < current_row + chunk_size) {
+                int64_t local_row = sequence_index - current_row;
+
+                if (chunk->type_id() == arrow::Type::STRING ||
+                    chunk->type_id() == arrow::Type::LARGE_STRING) {
+                    auto string_array = std::static_pointer_cast<arrow::StringArray>(chunk);
+
+                    if (!string_array->IsNull(local_row)) {
+                        std::string text = string_array->GetString(local_row);
+                        if (!text.empty()) {
+                            sequence_tokens = format_data->tokenizer->tokenize_text(text);
+                            if (!sequence_tokens.empty()) {
+                                sequence_processed = true;
+                                break;
+                            } else {
+                                LLAMA_LOG_WARN("Tokenization failed for sequence %lu: empty result\n", sequence_index);
+                            }
+                        }
+                    }
+                }
+            }
+            current_row += chunk_size;
+        }
+    }
+
+    // If still no data and we haven't tried tokens yet, try as fallback
+    if (!sequence_processed && !format_data->prefer_tokens_over_text &&
+        format_data->schema_info.primary_token_column_index >= 0) {
+
+        auto token_column = format_data->table->column(format_data->schema_info.primary_token_column_index);
+
+        // Find the correct chunk and extract token data
+        uint64_t current_row = 0;
+        for (int chunk_idx = 0; chunk_idx < token_column->num_chunks(); chunk_idx++) {
+            auto chunk = token_column->chunk(chunk_idx);
+            uint64_t chunk_size = chunk->length();
+
+            if (sequence_index >= current_row && sequence_index < current_row + chunk_size) {
+                uint64_t local_row = sequence_index - current_row;
+
+                if (chunk->type_id() == arrow::Type::LIST) {
+                    auto list_array = std::static_pointer_cast<arrow::ListArray>(chunk);
+
+                    if (!list_array->IsNull(local_row)) {
+                        auto slice = list_array->value_slice(local_row);
+                        if (llama_dataset_arrow_array_to_tokens(slice, sequence_tokens)) {
+                            sequence_processed = true;
+                            break;
+                        }
+                    }
+                } else if (chunk->type_id() == arrow::Type::INT32) {
+                    auto int32_array = std::static_pointer_cast<arrow::Int32Array>(chunk);
+
+                    if (!int32_array->IsNull(local_row)) {
+                        sequence_tokens.push_back(int32_array->Value(local_row));
+                        sequence_processed = true;
+                        break;
+                    }
+                }
+            }
+            current_row += chunk_size;
+        }
+    }
+
+    if (!sequence_processed || sequence_tokens.empty()) {
+        LLAMA_LOG_ERROR("Failed to load sequence %lu: no valid data found\n", sequence_index);
+        return nullptr;
+    }
+
+    // Create GGML tensor from tokens
+    struct ggml_tensor * tensor = create_tensor_from_tokens(sequence_tokens, dataset->ggml_ctx);
+    if (!tensor) {
+        llama_dataset_set_error("Failed to create tensor from tokens");
+        return nullptr;
+    }
+
+    // Check cache size limits and evict if necessary
+    size_t tensor_memory = estimate_tensor_cache_memory_usage(tensor);
+    if (format_data->cache_memory_usage + tensor_memory > format_data->cache_max_size) {
+        size_t target_usage = format_data->cache_max_size * 0.8; // Evict to 80% capacity
+        evict_tokenization_cache_entries(format_data, target_usage);
+    }
+
+    // Add to cache
+    format_data->tokenized_cache[sequence_index] = tensor;
+    format_data->cache_memory_usage += tensor_memory;
+    update_cache_access_order(format_data, sequence_index);
+
+    return tensor;
+}
+
+/**
+ * @brief Create GGML tensor from token vector.
+ *
+ * This helper function converts a vector of tokens to a GGML tensor suitable
+ * for storage in the tokenization cache. It handles memory allocation, tensor
+ * initialization, and data copying with proper error handling.
+ *
+ * @param tokens Vector of token IDs to convert
+ * @param ctx GGML context for tensor allocation
+ * @return Pointer to created GGML tensor, or NULL on allocation failure
+ */
+struct ggml_tensor * create_tensor_from_tokens(const std::vector<int32_t> & tokens,
+                                              struct ggml_context * ctx) {
+    if (tokens.empty() || !ctx) {
+        return nullptr;
+    }
+
+    // Create 1D tensor for token sequence
+    struct ggml_tensor * tensor = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, tokens.size());
+    if (!tensor) {
+        return nullptr;
+    }
+
+    // Copy token data to tensor
+    if (tensor->data) {
+        memcpy(tensor->data, tokens.data(), tokens.size() * sizeof(int32_t));
+    }
+
+    return tensor;
+}
+
+/**
+ * @brief Update cache access order for LRU management.
+ *
+ * This function updates the cache access tracking to maintain LRU ordering
+ * for efficient cache eviction. It moves the accessed sequence to the front
+ * of the access order list and ensures proper LRU semantics.
+ *
+ * @param format_data Parquet format data containing cache state
+ * @param sequence_index Index of the sequence that was accessed
+ */
+void update_cache_access_order(struct parquet_format_data * format_data,
+                              uint64_t sequence_index) {
+    if (!format_data) {
+        return;
+    }
+
+    // Remove sequence from current position if it exists
+    auto it = std::find(format_data->cache_access_order.begin(),
+                       format_data->cache_access_order.end(),
+                       sequence_index);
+    if (it != format_data->cache_access_order.end()) {
+        format_data->cache_access_order.erase(it);
+    }
+
+    // Add to front (most recently used)
+    format_data->cache_access_order.insert(format_data->cache_access_order.begin(), sequence_index);
+}
+
+/**
+ * @brief Evict cache entries to free memory.
+ *
+ * This function implements cache eviction using LRU strategy to free memory
+ * when the cache exceeds its size limits. It removes the least recently used
+ * entries and updates all cache tracking structures accordingly.
+ *
+ * @param format_data Parquet format data containing cache state
+ * @param target_memory_usage Target memory usage after eviction in bytes
+ * @return Amount of memory actually freed in bytes
+ */
+size_t evict_tokenization_cache_entries(struct parquet_format_data * format_data,
+                                       size_t target_memory_usage) {
+    if (!format_data) {
+        return 0;
+    }
+
+    size_t memory_freed = 0;
+
+    // Evict from least recently used (end of access order list)
+    while (format_data->cache_memory_usage > target_memory_usage &&
+           !format_data->cache_access_order.empty()) {
+
+        uint64_t lru_sequence = format_data->cache_access_order.back();
+        format_data->cache_access_order.pop_back();
+
+        auto cache_it = format_data->tokenized_cache.find(lru_sequence);
+        if (cache_it != format_data->tokenized_cache.end()) {
+            size_t tensor_memory = estimate_tensor_cache_memory_usage(cache_it->second);
+            memory_freed += tensor_memory;
+            format_data->cache_memory_usage -= tensor_memory;
+
+            // Note: We don't free the tensor here as it's managed by GGML context
+            format_data->tokenized_cache.erase(cache_it);
+        }
+    }
+
+    if (memory_freed > 0) {
+        LLAMA_LOG_INFO("Evicted %zu bytes from tokenization cache (target: %zu, current: %zu)\n",
+                       memory_freed, target_memory_usage, format_data->cache_memory_usage);
+    }
+
+    return memory_freed;
+}
+
+/**
+ * @brief Estimate memory usage of a cached tensor.
+ *
+ * This function calculates the memory footprint of a cached tensor entry,
+ * including the tensor structure, data storage, and cache overhead. This
+ * information is used for accurate cache size tracking and eviction decisions.
+ *
+ * @param tensor GGML tensor to estimate memory usage for
+ * @return Estimated memory usage in bytes
+ */
+size_t estimate_tensor_cache_memory_usage(const struct ggml_tensor * tensor) {
+    if (!tensor) {
+        return 0;
+    }
+
+    // Calculate tensor data size
+    size_t data_size = ggml_nbytes(tensor);
+
+    // Add overhead for tensor structure and cache entry
+    size_t overhead = sizeof(struct ggml_tensor) +
+                     sizeof(std::pair<uint64_t, struct ggml_tensor*>) +
+                     64; // Additional overhead estimate
+
+    return data_size + overhead;
 }
 
 #endif // LLAMA_PARQUET

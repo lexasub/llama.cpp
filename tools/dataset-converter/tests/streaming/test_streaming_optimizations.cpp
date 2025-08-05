@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "common.h"
+#include "common/log.h"
 #include "llama-dataset.h"
 #include "streaming-cache.h"
 #include "streaming-optimization-manager.h"
@@ -42,7 +43,7 @@ double measure_time_ms(Func&& func) {
 // Test the new streaming optimization API
 void test_streaming_optimization_api();
 void test_streaming_optimization_api() {
-    LLAMA_LOG_INFO("\n=== Testing Streaming Optimization API ===\n");
+    LOG_INF("\n=== Testing Streaming Optimization API ===\n");
 
     // Load a dataset in streaming mode
     const char* dataset_path = "test_data/small_dataset.gguf";
@@ -52,35 +53,35 @@ void test_streaming_optimization_api() {
     struct llama_dataset* dataset = llama_dataset_load_gguf(&params);
 
     if (!dataset) {
-        LLAMA_LOG_ERROR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
+        LOG_ERR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
         return;
     }
 
     // Verify streaming is enabled
     bool streaming_enabled = llama_dataset_is_streaming_enabled(dataset);
-    LLAMA_LOG_INFO("Streaming enabled: %s\n" , (streaming_enabled ? "yes" : "no"));
+    LOG_INF("Streaming enabled: %s\n" , (streaming_enabled ? "yes" : "no"));
 
     if (!streaming_enabled) {
-        LLAMA_LOG_ERROR("Dataset is not in streaming mode\n");
+        LOG_ERR("Dataset is not in streaming mode\n");
         llama_dataset_free(dataset);
         return;
     }
 
     // Configure streaming cache size
     bool result = llama_dataset_set_streaming_cache_size(dataset, 32 * 1024 * 1024); // 32MB
-    LLAMA_LOG_INFO("Set cache size: %s\n", (result ? "success" : "failed"));
+    LOG_INF("Set cache size: %s\n", (result ? "success" : "failed"));
 
     // Enable read-ahead buffering
     result = llama_dataset_set_streaming_read_ahead(dataset, true, 5);
-    LLAMA_LOG_INFO("Enable read-ahead: %s\n", (result ? "success" : "failed"));;
+    LOG_INF("Enable read-ahead: %s\n", (result ? "success" : "failed"));;
 
     // Enable adaptive cache sizing
     result = llama_dataset_set_adaptive_cache_sizing(dataset, true);
-    LLAMA_LOG_INFO("Enable adaptive cache: %s\n", (result ? "success" : "failed"));;
+    LOG_INF("Enable adaptive cache: %s\n", (result ? "success" : "failed"));;
 
     // Access some sequences to populate the cache
     uint64_t seq_count = llama_dataset_n_sequences(dataset);
-    LLAMA_LOG_INFO("Sequence count: %lu\n", seq_count);
+    LOG_INF("Sequence count: %lu\n", seq_count);
 
     // Access sequences in order
     for (uint64_t i = 0; i < std::min(seq_count, static_cast<uint64_t>(10)); i++) {
@@ -88,7 +89,7 @@ void test_streaming_optimization_api() {
         const int32_t* seq_data = llama_dataset_sequence(dataset, i);
 
         if (seq_data && seq_len > 0) {
-            LLAMA_LOG_INFO("Accessed sequence %lu (length: %d)\n", i, seq_len);
+            LOG_INF("Accessed sequence %lu (length: %d)\n", i, seq_len);
         }
     }
 
@@ -101,11 +102,11 @@ void test_streaming_optimization_api() {
 
     if (result) {
         auto memUsage = format_memory_size(memory_usage);
-        LLAMA_LOG_INFO("Cache hit ratio: %f\n", hit_ratio);
-        LLAMA_LOG_INFO("Memory usage: %s\n", memUsage.c_str());
-        LLAMA_LOG_INFO("Cache entries: %lu\n", entry_count);
+        LOG_INF("Cache hit ratio: %f\n", hit_ratio);
+        LOG_INF("Memory usage: %s\n", memUsage.c_str());
+        LOG_INF("Cache entries: %lu\n", entry_count);
     } else {
-        LLAMA_LOG_ERROR("Failed to get cache statistics: %s\n", llama_dataset_get_error_message());
+        LOG_ERR("Failed to get cache statistics: %s\n", llama_dataset_get_error_message());
     }
 
     // Clean up
@@ -115,7 +116,7 @@ void test_streaming_optimization_api() {
 // Test sequential vs random access performance
 void test_access_patterns();
 void test_access_patterns() {
-    LLAMA_LOG_INFO("\n=== Testing Access Patterns ===\n");
+    LOG_INF("\n=== Testing Access Patterns ===\n");
 
     // Load a dataset in streaming mode
     const char* dataset_path = "test_data/small_dataset.gguf";
@@ -125,12 +126,12 @@ void test_access_patterns() {
     struct llama_dataset* dataset = llama_dataset_load_gguf(&params);
 
     if (!dataset) {
-        LLAMA_LOG_ERROR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
+        LOG_ERR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
         return;
     }
 
     uint64_t seq_count = llama_dataset_n_sequences(dataset);
-    LLAMA_LOG_INFO("Sequence count: %lu\n", seq_count);
+    LOG_INF("Sequence count: %lu\n", seq_count);
 
     // Configure streaming optimizations
     llama_dataset_set_streaming_cache_size(dataset, 32 * 1024 * 1024); // 32MB
@@ -138,7 +139,7 @@ void test_access_patterns() {
     llama_dataset_set_adaptive_cache_sizing(dataset, true);
 
     // Test sequential access
-    LLAMA_LOG_INFO("\nTesting sequential access...\n");
+    LOG_INF("\nTesting sequential access...\n");
     double sequential_time = measure_time_ms([&]() {
         for (uint64_t i = 0; i < std::min(seq_count, static_cast<uint64_t>(20)); i++) {
             llama_dataset_sequence_length(dataset, i);
@@ -146,14 +147,14 @@ void test_access_patterns() {
         }
     });
 
-    LLAMA_LOG_INFO("Sequential access time: %f ms\n", sequential_time);
+    LOG_INF("Sequential access time: %f ms\n", sequential_time);
 
     // Get cache statistics after sequential access
     double hit_ratio_seq = 0.0;
     size_t memory_usage_seq = 0;
     size_t entry_count_seq = 0;
     llama_dataset_get_streaming_stats(dataset, &hit_ratio_seq, &memory_usage_seq, &entry_count_seq);
-    LLAMA_LOG_INFO("Cache hit ratio (sequential): %f\n", hit_ratio_seq);
+    LOG_INF("Cache hit ratio (sequential): %f\n", hit_ratio_seq);
 
     // Reset cache by setting a new size (forces eviction)
     llama_dataset_set_streaming_cache_size(dataset, 32 * 1024 * 1024);
@@ -170,7 +171,7 @@ void test_access_patterns() {
     std::shuffle(indices.begin(), indices.end(), g);
 
     // Test random access
-    LLAMA_LOG_INFO("\nTesting random access...\n");
+    LOG_INF("\nTesting random access...\n");
     double random_time = measure_time_ms([&]() {
         for (uint64_t i = 0; i < indices.size(); i++) {
             llama_dataset_sequence_length(dataset, indices[i]);
@@ -178,19 +179,19 @@ void test_access_patterns() {
         }
     });
 
-    LLAMA_LOG_INFO("Random access time: %f ms\n", random_time);
+    LOG_INF("Random access time: %f ms\n", random_time);
 
     // Get cache statistics after random access
     double hit_ratio_rand = 0.0;
     size_t memory_usage_rand = 0;
     size_t entry_count_rand = 0;
     llama_dataset_get_streaming_stats(dataset, &hit_ratio_rand, &memory_usage_rand, &entry_count_rand);
-    LLAMA_LOG_INFO("Cache hit ratio (random): %f\n", hit_ratio_rand);
+    LOG_INF("Cache hit ratio (random): %f\n", hit_ratio_rand);
 
     // Compare performance
-    LLAMA_LOG_INFO("\nPerformance comparison:\n");
-    LLAMA_LOG_INFO("Sequential vs Random: %f\n x", sequential_time / random_time);
-    LLAMA_LOG_INFO("Hit ratio difference: %f\n", hit_ratio_seq - hit_ratio_rand);
+    LOG_INF("\nPerformance comparison:\n");
+    LOG_INF("Sequential vs Random: %f\n x", sequential_time / random_time);
+    LOG_INF("Hit ratio difference: %f\n", hit_ratio_seq - hit_ratio_rand);
 
     // Clean up
     llama_dataset_free(dataset);
@@ -199,20 +200,20 @@ void test_access_patterns() {
 // Test memory usage optimization
 void test_memory_optimization();
 void test_memory_optimization() {
-    LLAMA_LOG_INFO("\n=== Testing Memory Usage Optimization ===\n");
+    LOG_INF("\n=== Testing Memory Usage Optimization ===\n");
 
     // Load a dataset in streaming mode
     const char* dataset_path = "test_data/small_dataset.gguf";
 
     // First load without optimization
-    LLAMA_LOG_INFO("Loading dataset without optimization...\n");
+    LOG_INF("Loading dataset without optimization...\n");
     common_params params;
     params.in_files.push_back(dataset_path);
     params.dataset_streaming = true;
     struct llama_dataset* dataset1 = llama_dataset_load_gguf(&params);
 
     if (!dataset1) {
-        LLAMA_LOG_ERROR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
+        LOG_ERR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
         return;
     }
 
@@ -233,13 +234,13 @@ void test_memory_optimization() {
     llama_dataset_free(dataset1);
 
     // Now load with optimization
-    LLAMA_LOG_INFO("Loading dataset with optimization...\n");
+    LOG_INF("Loading dataset with optimization...\n");
     params.in_files.back() = dataset_path;
     params.dataset_streaming = true;
     struct llama_dataset* dataset2 = llama_dataset_load_gguf(&params);
 
     if (!dataset2) {
-        LLAMA_LOG_ERROR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
+        LOG_ERR("Failed to load dataset: %s\n", llama_dataset_get_error_message());
         return;
     }
 
@@ -262,27 +263,27 @@ void test_memory_optimization() {
     llama_dataset_get_streaming_stats(dataset2, &hit_ratio2, &memory_usage2, &entry_count2);
 
     // Compare memory usage
-    LLAMA_LOG_INFO("\nMemory usage comparison:\n");
+    LOG_INF("\nMemory usage comparison:\n");
     auto format1 = format_memory_size(memory_usage1);
     auto format2 = format_memory_size(memory_usage2);
     auto format3 = format_memory_size(memory_usage1 - memory_usage2);
-    LLAMA_LOG_INFO("Without optimization: %s\n", format1.c_str());
-    LLAMA_LOG_INFO("With optimization: %s\n", format2.c_str());
-    LLAMA_LOG_INFO("Memory savings: %s (%f %%)\n", format3.c_str(),  100.0 * (memory_usage1 - memory_usage2) / memory_usage1);
+    LOG_INF("Without optimization: %s\n", format1.c_str());
+    LOG_INF("With optimization: %s\n", format2.c_str());
+    LOG_INF("Memory savings: %s (%f %%)\n", format3.c_str(),  100.0 * (memory_usage1 - memory_usage2) / memory_usage1);
 
     // Clean up
     llama_dataset_free(dataset2);
 }
 
 int main() {
-    LLAMA_LOG_INFO("Streaming Optimizations Test\n");
-    LLAMA_LOG_INFO("==========================\n");
+    LOG_INF("Streaming Optimizations Test\n");
+    LOG_INF("==========================\n");
 
     // Run tests
     test_streaming_optimization_api();
     test_access_patterns();
     test_memory_optimization();
 
-    LLAMA_LOG_INFO("\nAll tests completed!\n");
+    LOG_INF("\nAll tests completed!\n");
     return 0;
 }

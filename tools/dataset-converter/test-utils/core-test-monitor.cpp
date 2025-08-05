@@ -935,9 +935,30 @@ public:
  * ...
  * ```
  */
-int main() {
+int main(int argc, char** argv) {
     LLAMA_LOG_INFO("Core Dataset Functionality Test Monitor\n");
     LLAMA_LOG_INFO("=======================================\n");
+
+    // Parse command-line arguments for dataset paths
+    std::vector<std::string> dataset_paths;
+    
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            dataset_paths.push_back(argv[i]);
+        }
+        LLAMA_LOG_INFO("Using provided dataset paths:\n");
+        for (const auto& path : dataset_paths) {
+            LLAMA_LOG_INFO("  %s\n", path.c_str());
+        }
+    } else {
+        // Use default paths if none provided
+        dataset_paths = {
+            "test_data/small_dataset.gguf",
+            "test_data/text_dataset.txt",
+            "test_data/parquet_dataset.parquet"
+        };
+        LLAMA_LOG_INFO("Using default dataset paths\n");
+    }
 
     CoreTestMonitor monitor("bb");
 

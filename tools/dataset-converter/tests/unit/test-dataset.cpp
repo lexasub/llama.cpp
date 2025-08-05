@@ -8,7 +8,28 @@
 #include "llama-dataset.h"
 
 // Simple test for the dataset interface
-int main() {
+int main(int argc, char** argv) {
+    // Parse command-line arguments for specific dataset file paths
+    std::vector<std::string> dataset_files;
+    
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            dataset_files.push_back(argv[i]);
+        }
+        printf("Using provided dataset files:\n");
+        for (const auto& file : dataset_files) {
+            printf("  %s\n", file.c_str());
+        }
+    } else {
+        // Use default files if none provided
+        dataset_files = {
+            "test_data/small_dataset.gguf",
+            "test_data/text_dataset.txt",
+            "test_data/parquet_dataset.parquet"
+        };
+        printf("Using default dataset files\n");
+    }
+
     printf("Testing dataset interface...\n");
 
     // Test error handling with null path

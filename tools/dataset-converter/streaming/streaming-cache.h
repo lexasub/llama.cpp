@@ -22,8 +22,8 @@
 #include <shared_mutex>
 #include <cstring>
 #include "platform/platform-compat.h"
-#include "common/log.h"
-#include "llama-impl.h"
+#include "log.h"
+#include "llama.h"
 
 class llama_dataset_streaming_cache {
 public:
@@ -49,6 +49,11 @@ public:
         double hit_ratio = 0.0;
         size_t tokenized_entries = 0;
         size_t tensor_entries = 0;
+        size_t tokenization_memory_usage = 0;
+        size_t max_tokenization_memory = 0;
+        double tokenization_memory_pressure = 0.0;
+        size_t tokenization_cache_hits = 0;
+        size_t tokenization_cache_misses = 0;
     };
 
     explicit llama_dataset_streaming_cache(size_t max_memory)
@@ -64,7 +69,12 @@ public:
           eviction_policy(EvictionPolicy::ADAPTIVE),
           memory_pressure_threshold(0.8),
           adaptive_sizing_enabled(true),
-          initial_max_memory(max_memory) {}
+          initial_max_memory(max_memory),
+          max_tokenization_memory_bytes(max_memory / 2), // Default: 50% of total cache for tokenization
+          current_tokenization_memory_bytes(0),
+          tokenization_memory_pressure_threshold(0.8),
+          tokenization_hit_count(0),
+          tokenization_miss_count(0) {}
 
     ~llama_dataset_streaming_cache() {
         clear();
@@ -92,6 +102,18 @@ public:
     void put_tokenized(uint64_t sequence_id, const std::vector<int32_t> & tokens);
     
     bool has_tokenized(uint64_t sequence_id) const;
+    
+    // Enhanced tokenization methods for streaming support
+    void * get_or_tokenize_text(uint64_t sequence_id, const std::string & text, 
+                               struct llama_model * model, struct llama_context * ctx);
+    
+    void set_tokenization_cache_size(size_t max_tokenization_memory_bytes);
+    
+    void adjust_tokenization_cache_size(double memory_pressure_ratio);
+    
+    size_t get_tokenization_memory_usage() const;
+    
+    void evict_tokenized_entries(size_t target_memory_reduction);
 
     void remove(uint64_t sequence_id);
 
@@ -132,4 +154,13 @@ public:
     double memory_pressure_threshold;
     bool adaptive_sizing_enabled;
     size_t initial_max_memory;
+    
+    // Tokenization-specific memory management
+    size_t max_tokenization_memory_bytes;
+    std::atomic<size_t> current_tokenization_memory_bytes;
+    double tokenization_memory_pressure_threshold;
+    
+    // Tokenization-specific statistics
+    std::atomic<uint64_t> tokenization_hit_count;
+    std::atomic<uint64_t> tokenization_miss_count;
 };

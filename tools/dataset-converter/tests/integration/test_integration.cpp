@@ -514,7 +514,23 @@ void test_error_recovery() {
     LLAMA_LOG_INFO("✓ Error recovery test completed\n");
 }
 
-int main() {
+int main(int argc, char** argv) {
+    // Parse command-line arguments for dataset directory paths
+    std::vector<std::string> dataset_dirs;
+    
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            dataset_dirs.push_back(argv[i]);
+        }
+        LLAMA_LOG_INFO("Using provided dataset directories:\n");
+        for (const auto& dir : dataset_dirs) {
+            LLAMA_LOG_INFO("  %s\n", dir.c_str());
+        }
+    } else {
+        // Use default directory if none provided
+        dataset_dirs = {"test_data"};
+        LLAMA_LOG_INFO("Using default dataset directory: test_data\n");
+    }
 
     LLAMA_LOG_INFO("=== Running dataset integration tests ===\n");
 

@@ -173,7 +173,7 @@ bool CoreTokenizationTester::test_parquet_mixed_content() {
     bool has_text_column = !params.dataset_column.empty();
     bool has_token_column = !token_column.empty();
     
-    if (!can_handle_text || !has_text_column) {
+    if (!can_handle_text || !has_text_column || !has_token_column) {
         std::cout << "  Error: Mixed content configuration invalid" << std::endl;
         return false;
     }
@@ -304,9 +304,8 @@ bool CoreTokenizationTester::test_tokenization_error_handling() {
         
         // Should handle gracefully or throw
         auto stats = cache.get_stats();
-        if (stats.current_memory < 0) {
-            std::cout << "  Error: Invalid cache statistics" << std::endl;
-            return false;
+        if (stats.current_memory == 0) {
+            std::cout << "  Warning: No memory usage reported" << std::endl;
         }
     } catch (const std::exception& e) {
         // Expected behavior for invalid cache size
@@ -327,6 +326,7 @@ bool CoreTokenizationTester::test_tokenization_error_handling() {
         if (n_tokens > static_cast<int>(tokens.size())) {
             std::cout << "  Tokenization buffer overflow handled correctly" << std::endl;
         }
+        (void)n_tokens; // Suppress unused variable warning
     }
     
     std::cout << "  Error handling tests completed successfully" << std::endl;
@@ -397,11 +397,42 @@ bool CoreTokenizationTester::test_tokenization_cache_behavior() {
 int main(int argc, char** argv) {
     std::cout << "=== Extended Core Functionality Tokenization Tests ===" << std::endl;
     
+    // Parse command-line arguments for test data directory paths
+    std::vector<std::string> test_data_dirs;
+    std::string model_path;
+    
+    if (argc > 1) {
+        // First argument can be model path or test data directory
+        if (std::string(argv[1]).find(".gguf") != std::string::npos || 
+            std::string(argv[1]).find(".bin") != std::string::npos) {
+            model_path = argv[1];
+            // Remaining arguments are test data directories
+            for (int i = 2; i < argc; i++) {
+                test_data_dirs.push_back(argv[i]);
+            }
+        } else {
+            // All arguments are test data directories
+            for (int i = 1; i < argc; i++) {
+                test_data_dirs.push_back(argv[i]);
+            }
+        }
+        
+        if (!test_data_dirs.empty()) {
+            std::cout << "Using provided test data directories:\n";
+            for (const auto& dir : test_data_dirs) {
+                std::cout << "  " << dir << std::endl;
+            }
+        }
+    } else {
+        // Use default directory if none provided
+        test_data_dirs = {"test_data"};
+        std::cout << "Using default test data directory: test_data" << std::endl;
+    }
+    
     CoreTokenizationTester tester;
     
     // Initialize model if path provided
-    if (argc > 1) {
-        std::string model_path = argv[1];
+    if (!model_path.empty()) {
         if (!tester.init_model(model_path)) {
             std::cout << "Warning: Could not load model, some tests will be limited" << std::endl;
         }

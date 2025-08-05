@@ -100,7 +100,7 @@ bool create_directory_if_missing(const char* path);
  * @param path Path to the file
  * @return File size in bytes, 0 if file doesn't exist or error
  */
-uint64_t get_file_size(const char* path);
+size_t get_file_size(const char* path);
 
 // Note: Permission checking and validation result string functions
 // have been moved to test-data-validator-core.h

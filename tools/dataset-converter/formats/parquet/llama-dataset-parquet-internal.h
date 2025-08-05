@@ -132,6 +132,19 @@ extern "C" {
 #endif
 
 /**
+ * @brief Processing mode enumeration for tokenization strategy.
+ *
+ * This enumeration defines the primary processing strategy for Parquet datasets
+ * based on the available column types and user preferences. The mode determines
+ * how the dataset will handle data conversion and tokenization operations.
+ */
+enum parquet_processing_mode {
+    PARQUET_TEXT_MODE,   ///< Process primarily text columns with tokenization
+    PARQUET_TOKEN_MODE,  ///< Process primarily pre-tokenized columns
+    PARQUET_MIXED_MODE   ///< Process mixed content with intelligent column selection
+};
+
+/**
  * @brief Parquet-specific format data structure.
  *
  * This structure serves as the central state container for all Parquet dataset
@@ -158,6 +171,14 @@ extern "C" {
  * - **Streaming Setup**: Additional streaming-specific state is initialized
  * - **Cleanup**: All resources are properly freed through format_data cleanup
  *
+ * ## Tokenization State Management
+ *
+ * The structure includes comprehensive tokenization state tracking:
+ * - **Processing Mode**: Determines the primary data processing strategy
+ * - **Column Preferences**: Controls priority between text and token columns
+ * - **Cache Management**: Tracks memory usage and implements LRU eviction
+ * - **On-Demand Processing**: Supports dynamic tokenization for mixed content
+ *
  * @note This structure contains both C and C++ members for compatibility.
  *       C++ members are conditionally compiled and have opaque pointer
  *       equivalents for C compatibility.
@@ -179,12 +200,17 @@ struct parquet_format_data {
     struct parquet_schema_info                  schema_info;        ///< Detailed schema analysis results
     bool                                        schema_analyzed;    ///< Whether schema analysis has been completed
 
+    // Tokenization state management
+    enum parquet_processing_mode                processing_mode;    ///< Primary processing strategy (TEXT_MODE, TOKEN_MODE, MIXED_MODE)
+    bool                                        prefer_tokens_over_text; ///< Priority control for mixed content processing
+    bool                                        tokenization_enabled;    ///< Whether tokenization is active and available
+
     // Tokenization support
 #ifdef __cplusplus
     llama_dataset_parquet_tokenizer *           tokenizer;
     std::vector<std::string>                    text_columns;
     std::vector<std::string>                    token_columns;
-    std::unordered_map<uint64_t, std::vector<int32_t>> tokenized_cache;
+    std::unordered_map<uint64_t, struct ggml_tensor*> tokenized_cache; ///< Cache for tokenized sequences as GGML tensors
 #else
     void *                                      tokenizer;      // Opaque pointer for C compatibility
     void *                                      text_columns;   // Opaque pointer for C compatibility
@@ -192,6 +218,15 @@ struct parquet_format_data {
     void *                                      tokenized_cache; // Opaque pointer for C compatibility
 #endif
     bool                                        mixed_content;      ///< Whether the dataset contains both text and token columns
+
+    // Enhanced cache management for on-demand tokenization
+    size_t                                      cache_memory_usage; ///< Current memory consumption of tokenization cache in bytes
+    size_t                                      cache_max_size;     ///< Configured cache size limit in bytes
+#ifdef __cplusplus
+    std::vector<uint64_t>                       cache_access_order; ///< LRU tracking for cache eviction (most recent first)
+#else
+    void *                                      cache_access_order; // Opaque pointer for C compatibility
+#endif
 };
 
 //
@@ -482,6 +517,116 @@ size_t llama_dataset_handle_memory_pressure(struct llama_dataset * dataset, size
  * @return true if memory pressure was detected and handled
  */
 bool llama_dataset_monitor_memory_pressure(struct llama_dataset * dataset);
+
+/**
+ * @brief On-demand tokenization functions (implemented in llama-dataset-parquet-core.cpp)
+ *
+ * These functions provide on-demand tokenization support for Parquet datasets,
+ * enabling efficient processing of mixed content scenarios where both text and
+ * pre-tokenized data may be present. The functions implement intelligent caching,
+ * memory management, and error recovery for robust tokenization operations.
+ *
+ * ## On-Demand Tokenization Process
+ *
+ * 1. **Cache Lookup**: Check if sequence is already tokenized and cached
+ * 2. **Content Detection**: Determine if row contains text or pre-tokenized data
+ * 3. **Tokenization**: Convert text to tokens using llama tokenizer if needed
+ * 4. **Tensor Creation**: Convert token vectors to GGML tensor format
+ * 5. **Cache Storage**: Store result in tokenized_cache with LRU management
+ * 6. **Memory Management**: Handle cache eviction and memory pressure
+ *
+ * ## Mixed Content Handling
+ *
+ * The functions intelligently handle datasets with both text and token columns:
+ * - **Priority Selection**: Use prefer_tokens_over_text to choose data source
+ * - **Fallback Strategy**: Fall back to alternative column if primary fails
+ * - **Schema Integration**: Leverage schema analysis results for optimization
+ * - **Error Recovery**: Graceful handling of tokenization failures
+ *
+ * ## Cache Management Strategy
+ *
+ * - **LRU Eviction**: Remove least recently used entries when cache is full
+ * - **Memory Monitoring**: Track cache_memory_usage against cache_max_size
+ * - **Access Tracking**: Maintain cache_access_order for efficient eviction
+ * - **Batch Eviction**: Remove multiple entries efficiently during pressure
+ */
+
+/**
+ * @brief Load and tokenize a Parquet sequence on-demand.
+ *
+ * This function provides the core on-demand tokenization functionality for
+ * Parquet datasets. It checks the tokenization cache first, and if the sequence
+ * is not cached, it determines the appropriate data source (text vs tokens),
+ * performs tokenization if needed, converts to GGML tensor format, and stores
+ * the result in the cache for future access.
+ *
+ * @param dataset Dataset containing the Parquet data and tokenization context
+ * @param sequence_index Index of the sequence to load and tokenize
+ * @return Pointer to GGML tensor containing the tokenized sequence data,
+ *         or NULL on error (error details available via llama_dataset_get_error())
+ *
+ * @note The returned tensor pointer is managed by the dataset cache and should
+ *       not be freed by the caller. The tensor remains valid until cache eviction.
+ */
+#ifdef __cplusplus
+struct ggml_tensor * load_parquet_sequence_with_tokenization(struct llama_dataset * dataset,
+                                                            uint64_t sequence_index);
+#endif
+
+/**
+ * @brief Create GGML tensor from token vector.
+ *
+ * This helper function converts a vector of tokens to a GGML tensor suitable
+ * for storage in the tokenization cache. It handles memory allocation, tensor
+ * initialization, and data copying with proper error handling.
+ *
+ * @param tokens Vector of token IDs to convert
+ * @param ctx GGML context for tensor allocation
+ * @return Pointer to created GGML tensor, or NULL on allocation failure
+ */
+#ifdef __cplusplus
+struct ggml_tensor * create_tensor_from_tokens(const std::vector<int32_t> & tokens,
+                                              struct ggml_context * ctx);
+#endif
+
+/**
+ * @brief Update cache access order for LRU management.
+ *
+ * This function updates the cache access tracking to maintain LRU ordering
+ * for efficient cache eviction. It moves the accessed sequence to the front
+ * of the access order list and ensures proper LRU semantics.
+ *
+ * @param format_data Parquet format data containing cache state
+ * @param sequence_index Index of the sequence that was accessed
+ */
+void update_cache_access_order(struct parquet_format_data * format_data,
+                              uint64_t sequence_index);
+
+/**
+ * @brief Evict cache entries to free memory.
+ *
+ * This function implements cache eviction using LRU strategy to free memory
+ * when the cache exceeds its size limits. It removes the least recently used
+ * entries and updates all cache tracking structures accordingly.
+ *
+ * @param format_data Parquet format data containing cache state
+ * @param target_memory_usage Target memory usage after eviction in bytes
+ * @return Amount of memory actually freed in bytes
+ */
+size_t evict_tokenization_cache_entries(struct parquet_format_data * format_data,
+                                       size_t target_memory_usage);
+
+/**
+ * @brief Estimate memory usage of a cached tensor.
+ *
+ * This function calculates the memory footprint of a cached tensor entry,
+ * including the tensor structure, data storage, and cache overhead. This
+ * information is used for accurate cache size tracking and eviction decisions.
+ *
+ * @param tensor GGML tensor to estimate memory usage for
+ * @return Estimated memory usage in bytes
+ */
+size_t estimate_tensor_cache_memory_usage(const struct ggml_tensor * tensor);
 
 /**
  * @brief Core functions (implemented in llama-dataset-parquet-core.cpp)

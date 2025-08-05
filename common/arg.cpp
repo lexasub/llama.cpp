@@ -3638,14 +3638,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     ).set_examples({LLAMA_EXAMPLE_DATASET}));
 
     add_opt(common_arg(
-        {"--pre-tokenized"},
-        string_format("input file contains pre-tokenized data (space-separated token IDs)"),
-        [](common_params & params) {
-            params.pre_tokenized = true;
-        }
-    ).set_examples({LLAMA_EXAMPLE_DATASET}));
-
-    add_opt(common_arg(
         {"--preview"},
         string_format("read and print metadata and first sequence from the output GGUF file (enables preview)"),
         [](common_params & params) {
@@ -3655,9 +3647,33 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
 
     add_opt(common_arg(
         {"--dataset-column"}, "<name>",
-        string_format("column name for data in dataset files"),
+        string_format("column name for text data in dataset files (default: text)"),
         [](common_params & params, const std::string &dataset_column) {
             params.dataset_column = dataset_column;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
+
+    add_opt(common_arg(
+        {"--dataset-column-to"}, "<n>",
+        string_format("column name for output tokens in dataset files (default: tokens)"),
+        [](common_params & params, const std::string &dataset_column_to) {
+            params.dataset_column_to = dataset_column_to;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
+
+    add_opt(common_arg(
+        {"--dataset-tokenize-text"},
+        string_format("enable text tokenization for dataset processing"),
+        [](common_params & params) {
+            params.dataset_tokenize_text = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DATASET}));
+
+    add_opt(common_arg(
+        {"--dataset-tokenization-cache-size"}, "<n>",
+        string_format("tokenization cache size in MB (default: 256)"),
+        [](common_params & params, const std::string &cache_size) {
+            params.dataset_tokenization_cache_size = std::stoull(cache_size);
         }
     ).set_examples({LLAMA_EXAMPLE_DATASET}));
 

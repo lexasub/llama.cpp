@@ -193,19 +193,23 @@
 void print_usage(const char* program_name);
 
 void print_usage(const char* program_name) {
-    LLAMA_LOG_INFO("Usage: %s  [options]\n", program_name);
+    LLAMA_LOG_INFO("Usage: %s [options] [test_data_directories...]\n", program_name);
     LLAMA_LOG_INFO("\nOptions:\n");
     LLAMA_LOG_INFO("  --validate          Validate all test data files\n");
     LLAMA_LOG_INFO("  --create-missing    Create missing test data files\n");
     LLAMA_LOG_INFO("  --fix-permissions   Fix file permissions\n");
     LLAMA_LOG_INFO("  --report            Generate and print validation report\n");
     LLAMA_LOG_INFO("  --all               Perform all operations (validate, create, fix)\n");
-    LLAMA_LOG_INFO("  --test-dir <dir>    Specify test data directory (default: current)\n");
+    LLAMA_LOG_INFO("  --test-dir <dir>    Specify test data directory (can be used multiple times)\n");
     LLAMA_LOG_INFO("  --help              Show this help message\n");
+    LLAMA_LOG_INFO("\nArguments:\n");
+    LLAMA_LOG_INFO("  test_data_directories   One or more test data directory paths (default: current directory)\n");
     LLAMA_LOG_INFO("\nExamples:\n");
     LLAMA_LOG_INFO("  %s --validate\n", program_name);
     LLAMA_LOG_INFO("  %s --create-missing --fix-permissions\n", program_name);
     LLAMA_LOG_INFO("  %s --all --test-dir /path/to/test/data\n", program_name);
+    LLAMA_LOG_INFO("  %s --validate test_data tools/test_data\n", program_name);
+    LLAMA_LOG_INFO("  %s --all /path/to/test1 /path/to/test2 /path/to/test3\n", program_name);
 }
 
 /**
@@ -269,7 +273,7 @@ int main(int argc, char* argv[]) {
     bool fix_permissions = false;
     bool generate_report = false;
     bool all_operations = false;
-    std::string test_dir = ".";
+    std::vector<std::string> test_dirs;
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -286,15 +290,23 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--all") {
             all_operations = true;
         } else if (arg == "--test-dir" && i + 1 < argc) {
-            test_dir = argv[++i];
+            test_dirs.push_back(argv[++i]);
         } else if (arg == "--help") {
             print_usage(argv[0]);
             return 0;
+        } else if (arg.substr(0, 2) != "--") {
+            // Treat non-option arguments as test data directory paths
+            test_dirs.push_back(arg);
         } else {
             LLAMA_LOG_ERROR("Unknown option: %s \n", arg.c_str());
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    // Use default directory if none provided
+    if (test_dirs.empty()) {
+        test_dirs.push_back(".");
     }
 
     // If no specific operations requested, default to validation and report
@@ -313,88 +325,106 @@ int main(int argc, char* argv[]) {
 
     LLAMA_LOG_INFO("Test Data Validation Tool\n");
     LLAMA_LOG_INFO("========================\n");
-    LLAMA_LOG_INFO("Working directory: %s\n\n", test_dir.c_str());
-
-    // Initialize validator
-    TestDataValidator validator(test_dir);
-
-    // Check if test directory is accessible
-    if (!validator.IsDirectoryAccessible()) {
-        LLAMA_LOG_ERROR("Test directory is not accessible: %s\n", test_dir.c_str());
-        return 1;
+    LLAMA_LOG_INFO("Processing %zu test data directories:\n", test_dirs.size());
+    for (const auto& dir : test_dirs) {
+        LLAMA_LOG_INFO("  %s\n", dir.c_str());
     }
+    LLAMA_LOG_INFO("\n");
 
-    bool success = true;
+    bool overall_success = true;
 
-    // Create missing files first
-    if (create_missing) {
-        LLAMA_LOG_INFO("Creating missing test data files...\n");
-        if (validator.CreateMissingFiles()) {
-            LLAMA_LOG_INFO("✓ Successfully created missing files\n");
-        } else {
-            LLAMA_LOG_INFO("✗ Failed to create some missing files\n");
-            success = false;
+    // Process each test data directory
+    for (const auto& test_dir : test_dirs) {
+        LLAMA_LOG_INFO("=== Processing directory: %s ===\n", test_dir.c_str());
+        
+        // Initialize validator for this directory
+        TestDataValidator validator(test_dir);
+
+        // Check if test directory is accessible
+        if (!validator.IsDirectoryAccessible()) {
+            LLAMA_LOG_ERROR("Test directory is not accessible: %s\n", test_dir.c_str());
+            overall_success = false;
+            continue;
         }
-        LLAMA_LOG_INFO("\n");
-    }
 
-    // Fix permissions
-    if (fix_permissions) {
-        LLAMA_LOG_INFO("Fixing file permissions...\n");
-        if (validator.FixPermissions()) {
-            LLAMA_LOG_INFO("✓ Successfully fixed file permissions\n");
-        } else {
-            LLAMA_LOG_INFO("✗ Failed to fix some file permissions\n");
-            success = false;
+        bool success = true;
+
+        // Create missing files first
+        if (create_missing) {
+            LLAMA_LOG_INFO("Creating missing test data files...\n");
+            if (validator.CreateMissingFiles()) {
+                LLAMA_LOG_INFO("✓ Successfully created missing files\n");
+            } else {
+                LLAMA_LOG_INFO("✗ Failed to create some missing files\n");
+                success = false;
+            }
+            LLAMA_LOG_INFO("\n");
         }
-        LLAMA_LOG_INFO("\n");
-    }
 
-    // Validate files
-    if (validate) {
-        LLAMA_LOG_INFO("Validating test data files...\n");
-        if (validator.ValidateAllFiles()) {
-            LLAMA_LOG_INFO("✓ All required test data files are valid\n");
-        } else {
-            LLAMA_LOG_INFO("✗ Some test data files are invalid or missing\n");
-            success = false;
+        // Fix permissions
+        if (fix_permissions) {
+            LLAMA_LOG_INFO("Fixing file permissions...\n");
+            if (validator.FixPermissions()) {
+                LLAMA_LOG_INFO("✓ Successfully fixed file permissions\n");
+            } else {
+                LLAMA_LOG_INFO("✗ Failed to fix some file permissions\n");
+                success = false;
+            }
+            LLAMA_LOG_INFO("\n");
         }
-        LLAMA_LOG_INFO("\n");
-    }
 
-    // Generate report
-    if (generate_report) {
-        LLAMA_LOG_INFO("Generating validation report...\n");
-        auto report = validator.GenerateReport();
-        validator.PrintReport(report);
-        LLAMA_LOG_INFO("\n");
-    }
-
-    // Show missing and corrupted files
-    auto missing_files = validator.GetMissingFiles();
-    if (!missing_files.empty()) {
-        LLAMA_LOG_INFO("Missing files:\n");
-        for (const auto& file : missing_files) {
-            LLAMA_LOG_INFO("  - %s\n", file.c_str());
+        // Validate files
+        if (validate) {
+            LLAMA_LOG_INFO("Validating test data files...\n");
+            if (validator.ValidateAllFiles()) {
+                LLAMA_LOG_INFO("✓ All required test data files are valid\n");
+            } else {
+                LLAMA_LOG_INFO("✗ Some test data files are invalid or missing\n");
+                success = false;
+            }
+            LLAMA_LOG_INFO("\n");
         }
-        LLAMA_LOG_INFO("\n");
-    }
 
-    auto corrupted_files = validator.GetCorruptedFiles();
-    if (!corrupted_files.empty()) {
-        LLAMA_LOG_INFO("Corrupted files:\n");
-        for (const auto& file : corrupted_files) {
-            LLAMA_LOG_INFO("  - %s\n", file.c_str());
+        // Generate report
+        if (generate_report) {
+            LLAMA_LOG_INFO("Generating validation report...\n");
+            auto report = validator.GenerateReport();
+            validator.PrintReport(report);
+            LLAMA_LOG_INFO("\n");
         }
-        LLAMA_LOG_INFO("\n");
+
+        // Show missing and corrupted files
+        auto missing_files = validator.GetMissingFiles();
+        if (!missing_files.empty()) {
+            LLAMA_LOG_INFO("Missing files:\n");
+            for (const auto& file : missing_files) {
+                LLAMA_LOG_INFO("  - %s\n", file.c_str());
+            }
+            LLAMA_LOG_INFO("\n");
+        }
+
+        auto corrupted_files = validator.GetCorruptedFiles();
+        if (!corrupted_files.empty()) {
+            LLAMA_LOG_INFO("Corrupted files:\n");
+            for (const auto& file : corrupted_files) {
+                LLAMA_LOG_INFO("  - %s\n", file.c_str());
+            }
+            LLAMA_LOG_INFO("\n");
+        }
+
+        if (!success) {
+            overall_success = false;
+        }
+
+        LLAMA_LOG_INFO("=== Completed directory: %s ===\n\n", test_dir.c_str());
     }
 
     // Summary
-    if (success) {
-        LLAMA_LOG_INFO("✓ Test data validation completed successfully\n");
+    if (overall_success) {
+        LLAMA_LOG_INFO("✓ Test data validation completed successfully for all directories\n");
         return 0;
     } else {
-        LLAMA_LOG_INFO("✗ Test data validation completed with errors\n");
+        LLAMA_LOG_INFO("✗ Test data validation completed with errors in one or more directories\n");
         return 1;
     }
 }

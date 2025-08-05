@@ -10,14 +10,14 @@ endif()
 function(run_command_with_monitoring COMMAND_NAME EXECUTABLE)
     message(STATUS "=== Testing: ${COMMAND_NAME} ===")
     message(STATUS "Executable: ${EXECUTABLE}")
-    
+
     # Check if executable exists
     if(NOT EXISTS ${EXECUTABLE})
         message(FATAL_ERROR "❌ FAIL: Executable not found: ${EXECUTABLE}")
     endif()
-    
+
     message(STATUS "✅ Executable exists")
-    
+
     # Run the executable and capture output
     execute_process(
         COMMAND ${EXECUTABLE}
@@ -27,70 +27,54 @@ function(run_command_with_monitoring COMMAND_NAME EXECUTABLE)
         ERROR_VARIABLE STDERR_OUTPUT
         TIMEOUT 30
     )
-    
+
     message(STATUS "Exit Code: ${EXIT_CODE}")
-    
+
     # Display output
     if(STDOUT_OUTPUT)
         message(STATUS "--- STDOUT ---")
         message(STATUS "${STDOUT_OUTPUT}")
     endif()
-    
+
     if(STDERR_OUTPUT)
         message(STATUS "--- STDERR ---")
         message(STATUS "${STDERR_OUTPUT}")
     endif()
-    
+
     # Analyze output for patterns
     message(STATUS "--- Analysis ---")
-    
-    if(EXIT_CODE EQUAL 0)
-        message(STATUS "✅ Test PASSED")
-    else
-        message(STATUS "❌ Test FAILED (exit code: ${EXIT_CODE})")
-        
-        if(EXIT_CODE EQUAL 139)
-            message(STATUS "⚠️  Segmentation fault detected")
-        elseif(EXIT_CODE EQUAL 134)
-            message(STATUS "⚠️  Abort signal detected")
-        elseif(EXIT_CODE EQUAL 124)
-            message(STATUS "⚠️  Timeout occurred")
-        else()
-            message(STATUS "⚠️  Unknown failure mode")
-        endif()
-    endif()
-    
+
     # Pattern analysis
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "null" NULL_FOUND)
     if(NOT NULL_FOUND EQUAL -1)
         message(STATUS "✓ NULL pointer handling tested")
     endif()
-    
+
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "not found" NOT_FOUND_FOUND)
     if(NOT NOT_FOUND_FOUND EQUAL -1)
         message(STATUS "✓ File not found error handling tested")
     endif()
-    
+
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "gguf" GGUF_FOUND)
     if(NOT GGUF_FOUND EQUAL -1)
         message(STATUS "✓ GGUF format handling tested")
     endif()
-    
+
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "text" TEXT_FOUND)
     if(NOT TEXT_FOUND EQUAL -1)
         message(STATUS "✓ Text format handling tested")
     endif()
-    
+
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "parquet" PARQUET_FOUND)
     if(NOT PARQUET_FOUND EQUAL -1)
         message(STATUS "✓ Parquet format handling tested")
     endif()
-    
+
     string(FIND "${STDOUT_OUTPUT}${STDERR_OUTPUT}" "All tests passed" ALL_PASSED_FOUND)
     if(NOT ALL_PASSED_FOUND EQUAL -1)
         message(STATUS "✅ All internal assertions passed")
     endif()
-    
+
     # Return exit code for further processing
     if(NOT EXIT_CODE EQUAL 0)
         message(FATAL_ERROR "Test failed with exit code: ${EXIT_CODE}")
@@ -134,7 +118,7 @@ endif()
 # Create minimal text test data if it doesn't exist
 if(NOT EXISTS "${WORKING_DIRECTORY}/test_data/text_dataset.txt")
     message(STATUS "Creating minimal text test data...")
-    file(WRITE "${WORKING_DIRECTORY}/test_data/text_dataset.txt" 
+    file(WRITE "${WORKING_DIRECTORY}/test_data/text_dataset.txt"
         "This is a test dataset for text processing.\n"
         "It contains multiple lines of text data.\n"
         "Each line represents a training sequence.\n"

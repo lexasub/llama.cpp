@@ -59,6 +59,7 @@
 #include "streaming-cache.h"
 
 #include <sys/resource.h>
+#include "llama.h"
 
 #include <algorithm>
 #include <atomic>
@@ -169,6 +170,9 @@ void llama_dataset_streaming_cache::evict_lru() {
 
         free(lru_entry.data);
         current_memory_bytes -= lru_entry.size;
+        if (lru_entry.entry_type == CacheEntryType::TOKENIZED_SEQUENCE) {
+            current_tokenization_memory_bytes -= lru_entry.size;
+        }
         ++eviction_count;
     }
 
@@ -219,6 +223,9 @@ void llama_dataset_streaming_cache::evict_lfu() {
                             min_it->sequence_id, min_it->size);
             free(min_it->data);
             current_memory_bytes -= min_it->size;
+            if (min_it->entry_type == CacheEntryType::TOKENIZED_SEQUENCE) {
+                current_tokenization_memory_bytes -= min_it->size;
+            }
             ++eviction_count;
         }
 
@@ -325,6 +332,9 @@ void llama_dataset_streaming_cache::check_memory_pressure() {
     getrusage(RUSAGE_SELF, &usage);
 
     double memory_ratio = static_cast<double>(current_memory_bytes.load()) / max_memory_bytes;
+    double tokenization_memory_ratio = (max_tokenization_memory_bytes > 0) ? 
+        static_cast<double>(current_tokenization_memory_bytes.load()) / max_tokenization_memory_bytes : 0.0;
+    
     {
         std::unique_lock lock(cache_mutex);
         if (memory_ratio > memory_pressure_threshold) {
@@ -340,7 +350,18 @@ void llama_dataset_streaming_cache::check_memory_pressure() {
                 LLAMA_LOG_DEBUG("Low memory pressure, increasing cache to %zu bytes\n", new_max);
             }
         }
+        
+        // Handle tokenization memory pressure separately
+        if (tokenization_memory_ratio > tokenization_memory_pressure_threshold) {
+            size_t target_reduction = current_tokenization_memory_bytes.load() * 0.2; // Reduce by 20%
+            evict_tokenized_entries(target_reduction);
+            LLAMA_LOG_DEBUG("Tokenization memory pressure detected (%.2f), evicted %zu bytes\n", 
+                           tokenization_memory_ratio, target_reduction);
+        }
     }
+    
+    // Also call the adaptive tokenization cache sizing
+    adjust_tokenization_cache_size(memory_ratio);
 }
 
 /**
@@ -615,6 +636,7 @@ void llama_dataset_streaming_cache::remove(uint64_t sequence_id) {
             std::unique_lock stats_lock(stats_mutex);
             free(list_it->data);
             current_memory_bytes -= list_it->size;
+            current_tokenization_memory_bytes -= list_it->size;
         }
 
         cache_list.erase(list_it);
@@ -660,12 +682,16 @@ void llama_dataset_streaming_cache::clear() {
         std::unique_lock stats_lock(stats_mutex);
         cache_list.clear();
         cache_map.clear();
+        tokenized_cache_map.clear();
         current_memory_bytes = 0;
+        current_tokenization_memory_bytes = 0;
         hit_count            = 0;
         miss_count           = 0;
         eviction_count       = 0;
         access_count         = 0;
         timestamp_counter    = 0;
+        tokenization_hit_count = 0;
+        tokenization_miss_count = 0;
     }
 
     LLAMA_LOG_DEBUG("Cleared streaming cache\n");
@@ -919,6 +945,12 @@ llama_dataset_streaming_cache::CacheStats llama_dataset_streaming_cache::get_sta
     stats.hit_ratio      = (access_count > 0) ? static_cast<double>(hit_count) / access_count : 0.0;
     stats.tokenized_entries = tokenized_cache_map.size();
     stats.tensor_entries = cache_map.size();
+    stats.tokenization_memory_usage = current_tokenization_memory_bytes.load();
+    stats.max_tokenization_memory = max_tokenization_memory_bytes;
+    stats.tokenization_memory_pressure = (max_tokenization_memory_bytes > 0) ? 
+        static_cast<double>(current_tokenization_memory_bytes.load()) / max_tokenization_memory_bytes : 0.0;
+    stats.tokenization_cache_hits = tokenization_hit_count;
+    stats.tokenization_cache_misses = tokenization_miss_count;
     return stats;
 }
 
@@ -962,4 +994,441 @@ size_t llama_dataset_streaming_cache::get_max_memory() const {
 void update_access_stats(std::list<CacheEntry>::iterator entry_it) {
     entry_it->last_access_time = get_current_timestamp();
     ++entry_it->access_count;
+}
+/**
+ * @brief Retrieves tokenized sequence data from the cache
+ * @param sequence_id Unique identifier of the tokenized sequence to retrieve
+ * @return Pointer to the tokenized data, or nullptr if not found
+ * 
+ * Performs cache lookup specifically for tokenized sequences. If the sequence is
+ * found, it is moved to the front of the LRU list and access statistics
+ * are updated. The returned pointer points to a vector<int32_t> containing
+ * the tokenized sequence.
+ * 
+ * ## Algorithm Complexity
+ * - Time: O(1) for cache operations
+ * - Space: O(1) - No additional memory allocation
+ * 
+ * ## Thread Safety
+ * Uses shared lock for read operations and unique lock for statistics
+ * updates to minimize lock contention while ensuring data consistency.
+ * 
+ * @note The returned pointer is valid until the entry is evicted.
+ *       Callers should not free the returned memory.
+ */
+void * llama_dataset_streaming_cache::get_tokenized(uint64_t sequence_id) {
+    std::shared_lock lock(cache_mutex);
+    ++access_count;
+
+    auto it = tokenized_cache_map.find(sequence_id);
+    if (it == tokenized_cache_map.end()) {
+        std::unique_lock stats_lock(stats_mutex);
+        ++miss_count;
+        return nullptr;
+    }
+
+    {
+        std::unique_lock stats_lock(stats_mutex);
+        ++hit_count;
+        auto list_it = it->second;
+        cache_list.splice(cache_list.begin(), cache_list, list_it);
+        update_access_stats(list_it);
+    }
+
+    return it->second->data;
+}
+
+/**
+ * @brief Stores tokenized sequence data in the cache
+ * @param sequence_id Unique identifier for the tokenized sequence
+ * @param tokens Vector of int32_t tokens to store
+ * 
+ * Adds tokenized sequence data to the cache. The tokens are copied into
+ * a newly allocated buffer that the cache takes ownership of. If the cache
+ * is full, eviction is triggered according to the current eviction policy.
+ * 
+ * ## Memory Management
+ * - Creates a copy of the token vector in heap memory
+ * - Takes ownership of the allocated memory
+ * - Automatically frees memory when the entry is evicted
+ * 
+ * ## Algorithm Complexity
+ * - Time: O(n) where n is the number of tokens (for copying)
+ * - Space: O(n) - Stores the token data
+ * 
+ * ## Thread Safety
+ * Uses unique locks to ensure exclusive access during cache modifications
+ * and memory accounting updates.
+ * 
+ * @note Empty token vectors are ignored safely.
+ */
+void llama_dataset_streaming_cache::put_tokenized(uint64_t sequence_id, const std::vector<int32_t> & tokens) {
+    if (tokens.empty()) {
+        return;
+    }
+
+    std::unique_lock lock(cache_mutex);
+    auto existing_it = tokenized_cache_map.find(sequence_id);
+
+    {
+        std::unique_lock stats_lock(stats_mutex);
+        ++access_count;
+    }
+
+    size_t data_size = tokens.size() * sizeof(int32_t);
+    
+    if (existing_it != tokenized_cache_map.end()) {
+        auto list_it = existing_it->second;
+        std::unique_lock stats_lock(stats_mutex);
+        free(list_it->data);
+        current_memory_bytes -= list_it->size;
+        current_tokenization_memory_bytes -= list_it->size;
+        
+        // Allocate new memory and copy tokens
+        list_it->data = malloc(data_size);
+        if (!list_it->data) {
+            LLAMA_LOG_ERROR("Failed to allocate memory for tokenized sequence %zu\n", sequence_id);
+            return;
+        }
+        memcpy(list_it->data, tokens.data(), data_size);
+        list_it->size = data_size;
+        current_memory_bytes += data_size;
+        current_tokenization_memory_bytes += data_size;
+        update_access_stats(list_it);
+        cache_list.splice(cache_list.begin(), cache_list, list_it);
+        return;
+    }
+
+    // Check if we need to evict entries
+    {
+        std::unique_lock stats_lock(stats_mutex);
+        current_memory_bytes += data_size;
+        current_tokenization_memory_bytes += data_size;
+    }
+
+    while (current_memory_bytes > max_memory_bytes && !cache_list.empty()) {
+        switch (eviction_policy) {
+            case EvictionPolicy::LRU:
+                evict_lru();
+                break;
+            case EvictionPolicy::LFU:
+                evict_lfu();
+                break;
+            case EvictionPolicy::ADAPTIVE:
+                evict_adaptive();
+                break;
+        }
+    }
+
+    // Allocate memory and copy tokens
+    void * data = malloc(data_size);
+    if (!data) {
+        std::unique_lock stats_lock(stats_mutex);
+        current_memory_bytes -= data_size;
+        current_tokenization_memory_bytes -= data_size;
+        LLAMA_LOG_ERROR("Failed to allocate memory for tokenized sequence %zu\n", sequence_id);
+        return;
+    }
+    memcpy(data, tokens.data(), data_size);
+
+    {
+        std::unique_lock stats_lock(stats_mutex);
+        cache_list.emplace_front(data, data_size, sequence_id, CacheEntryType::TOKENIZED_SEQUENCE);
+
+        auto it = cache_list.begin();
+        it->last_access_time = get_current_timestamp();
+        it->access_count = 1;
+        tokenized_cache_map[sequence_id] = it;
+    }
+
+    LLAMA_LOG_DEBUG("Cached tokenized sequence %zu in streaming cache (size: %zu bytes, total: %zu/%zu bytes)\n", 
+                    sequence_id, data_size, current_memory_bytes.load(), max_memory_bytes);
+}
+
+/**
+ * @brief Checks if a tokenized sequence exists in the cache
+ * @param sequence_id Unique identifier of the tokenized sequence to check
+ * @return True if the tokenized sequence exists in cache, false otherwise
+ * 
+ * Performs a simple existence check without affecting LRU ordering or
+ * access statistics. This is useful for cache hit prediction and
+ * prefetching decisions.
+ * 
+ * ## Algorithm Complexity
+ * - Time: O(1) - Direct hash map lookup
+ * - Space: O(1) - No memory allocation
+ * 
+ * ## Thread Safety
+ * Uses shared lock to allow concurrent reads while preventing
+ * inconsistent results during cache modifications.
+ * 
+ * @note This method does not update access statistics or LRU ordering.
+ */
+bool llama_dataset_streaming_cache::has_tokenized(uint64_t sequence_id) const {
+    std::shared_lock lock(cache_mutex);
+    return tokenized_cache_map.find(sequence_id) != tokenized_cache_map.end();
+}
+
+/**
+ * @brief Gets tokenized sequence or performs on-demand tokenization
+ * @param sequence_id Unique identifier for the sequence
+ * @param text Raw text to tokenize if not cached
+ * @param model Llama model for tokenization
+ * @param ctx Llama context for tokenization
+ * @return Pointer to tokenized data, or nullptr on error
+ * 
+ * This method implements the core streaming tokenization functionality.
+ * It first checks if the tokenized sequence is already cached. If not,
+ * it performs on-demand tokenization using the provided model and context,
+ * then caches the result for future access.
+ * 
+ * ## Algorithm Flow
+ * 1. Check tokenization cache for existing entry
+ * 2. If found, update access statistics and return cached data
+ * 3. If not found, tokenize text using llama model
+ * 4. Cache the tokenized result
+ * 5. Return pointer to cached tokenized data
+ * 
+ * ## Memory Management
+ * - Automatically manages tokenization cache memory
+ * - Triggers eviction when memory pressure is detected
+ * - Uses LRU strategy for tokenization cache entries
+ * 
+ * ## Error Handling
+ * - Returns nullptr if model or context is invalid
+ * - Handles tokenization failures gracefully
+ * - Provides detailed error logging
+ * 
+ * @note This method is thread-safe and can be called concurrently
+ */
+void * llama_dataset_streaming_cache::get_or_tokenize_text(uint64_t sequence_id, const std::string & text, 
+                                                          struct llama_model * model, struct llama_context * ctx) {
+    if (!model || !ctx || text.empty()) {
+        LLAMA_LOG_ERROR("Invalid parameters for tokenization: model=%p, ctx=%p, text_empty=%d\n", 
+                        static_cast<void*>(model), static_cast<void*>(ctx), static_cast<int>(text.empty()));
+        return nullptr;
+    }
+    
+    // First check if already tokenized and cached
+    {
+        std::shared_lock lock(cache_mutex);
+        auto it = tokenized_cache_map.find(sequence_id);
+        if (it != tokenized_cache_map.end()) {
+            std::unique_lock stats_lock(stats_mutex);
+            ++tokenization_hit_count;
+            ++hit_count;
+            auto list_it = it->second;
+            cache_list.splice(cache_list.begin(), cache_list, list_it);
+            update_access_stats(list_it);
+            return list_it->data;
+        }
+    }
+    
+    // Cache miss - perform tokenization
+    {
+        std::unique_lock stats_lock(stats_mutex);
+        ++tokenization_miss_count;
+        ++miss_count;
+    }
+    
+    // Get vocab from model and tokenize the text
+    const struct llama_vocab * vocab = llama_model_get_vocab(model);
+    if (!vocab) {
+        LLAMA_LOG_ERROR("Failed to get vocabulary from model for sequence %zu\n", sequence_id);
+        return nullptr;
+    }
+    
+    // Allocate buffer for tokens (estimate: text length / 2 tokens)
+    std::vector<llama_token> tokens;
+    tokens.resize(text.length() + 16); // Add some padding
+    
+    int32_t n_tokens = llama_tokenize(vocab, text.c_str(), text.length(), 
+                                     tokens.data(), tokens.size(), false, true);
+    
+    if (n_tokens < 0) {
+        // Buffer too small, resize and try again
+        tokens.resize(-n_tokens);
+        n_tokens = llama_tokenize(vocab, text.c_str(), text.length(), 
+                                 tokens.data(), tokens.size(), false, true);
+    }
+    
+    if (n_tokens <= 0) {
+        LLAMA_LOG_ERROR("Tokenization failed for sequence %zu (text length: %zu)\n", 
+                        sequence_id, text.length());
+        return nullptr;
+    }
+    
+    tokens.resize(n_tokens);
+    
+    // Convert to int32_t vector for caching
+    std::vector<int32_t> int32_tokens;
+    int32_tokens.reserve(tokens.size());
+    for (llama_token token : tokens) {
+        int32_tokens.push_back(static_cast<int32_t>(token));
+    }
+    
+    // Check tokenization memory pressure before caching
+    size_t token_data_size = int32_tokens.size() * sizeof(int32_t);
+    double tokenization_pressure = static_cast<double>(current_tokenization_memory_bytes.load() + token_data_size) 
+                                  / max_tokenization_memory_bytes;
+    
+    if (tokenization_pressure > tokenization_memory_pressure_threshold) {
+        // Evict some tokenized entries to make room
+        size_t target_reduction = token_data_size * 2; // Evict twice the needed space
+        evict_tokenized_entries(target_reduction);
+    }
+    
+    // Cache the tokenized result
+    put_tokenized(sequence_id, int32_tokens);
+    
+    // Return the cached data
+    std::shared_lock lock(cache_mutex);
+    auto it = tokenized_cache_map.find(sequence_id);
+    if (it != tokenized_cache_map.end()) {
+        return it->second->data;
+    }
+    
+    LLAMA_LOG_ERROR("Failed to cache tokenized sequence %zu\n", sequence_id);
+    return nullptr;
+}
+
+/**
+ * @brief Sets the maximum memory limit for tokenization cache
+ * @param max_tokenization_memory_bytes Maximum memory in bytes for tokenized sequences
+ * 
+ * Configures the memory limit specifically for tokenized sequence caching.
+ * This allows fine-grained control over memory usage between regular tensor
+ * caching and tokenization caching.
+ * 
+ * ## Memory Management
+ * - Triggers eviction if current usage exceeds new limit
+ * - Uses LRU strategy for tokenization-specific eviction
+ * - Updates memory pressure calculations
+ * 
+ * @note This limit is separate from the general cache memory limit
+ */
+void llama_dataset_streaming_cache::set_tokenization_cache_size(size_t max_tokenization_memory_bytes) {
+    std::unique_lock lock(cache_mutex);
+    this->max_tokenization_memory_bytes = max_tokenization_memory_bytes;
+    
+    // If current usage exceeds new limit, trigger eviction
+    if (current_tokenization_memory_bytes.load() > max_tokenization_memory_bytes) {
+        size_t excess = current_tokenization_memory_bytes.load() - max_tokenization_memory_bytes;
+        evict_tokenized_entries(excess);
+    }
+    
+    LLAMA_LOG_DEBUG("Set tokenization cache max memory to %zu bytes\n", max_tokenization_memory_bytes);
+}
+
+/**
+ * @brief Adjusts tokenization cache size based on memory pressure
+ * @param memory_pressure_ratio Current memory pressure ratio (0.0-1.0)
+ * 
+ * Implements adaptive sizing for the tokenization cache based on system
+ * memory pressure. This helps maintain optimal performance while preventing
+ * memory exhaustion.
+ * 
+ * ## Adjustment Strategy
+ * - High pressure (>0.8): Reduce cache size by 20%
+ * - Medium pressure (0.6-0.8): Maintain current size
+ * - Low pressure (<0.6): Increase cache size by 10%
+ * 
+ * ## Bounds Checking
+ * - Minimum: 25% of initial tokenization cache size
+ * - Maximum: 150% of initial tokenization cache size
+ */
+void llama_dataset_streaming_cache::adjust_tokenization_cache_size(double memory_pressure_ratio) {
+    if (!adaptive_sizing_enabled) {
+        return;
+    }
+    
+    std::unique_lock lock(cache_mutex);
+    size_t initial_tokenization_memory = initial_max_memory / 2; // 50% of initial total
+    
+    if (memory_pressure_ratio > 0.8) {
+        // High pressure - reduce cache size
+        size_t new_max = max_tokenization_memory_bytes * 0.8;
+        size_t min_allowed = initial_tokenization_memory * 0.25;
+        if (new_max >= min_allowed) {
+            set_tokenization_cache_size(new_max);
+            LLAMA_LOG_DEBUG("High memory pressure (%.2f), reducing tokenization cache to %zu bytes\n", 
+                           memory_pressure_ratio, new_max);
+        }
+    } else if (memory_pressure_ratio < 0.6) {
+        // Low pressure - increase cache size
+        size_t new_max = max_tokenization_memory_bytes * 1.1;
+        size_t max_allowed = initial_tokenization_memory * 1.5;
+        if (new_max <= max_allowed) {
+            set_tokenization_cache_size(new_max);
+            LLAMA_LOG_DEBUG("Low memory pressure (%.2f), increasing tokenization cache to %zu bytes\n", 
+                           memory_pressure_ratio, new_max);
+        }
+    }
+}
+
+/**
+ * @brief Gets current memory usage for tokenization cache
+ * @return Current memory usage in bytes for tokenized sequences
+ * 
+ * Provides thread-safe access to current tokenization cache memory usage.
+ * This is useful for monitoring and debugging memory consumption.
+ */
+size_t llama_dataset_streaming_cache::get_tokenization_memory_usage() const {
+    return current_tokenization_memory_bytes.load();
+}
+
+/**
+ * @brief Evicts tokenized entries to reduce memory usage
+ * @param target_memory_reduction Target amount of memory to free in bytes
+ * 
+ * Implements LRU eviction specifically for tokenized sequences. This method
+ * is called when tokenization memory pressure is detected or when the
+ * tokenization cache size is reduced.
+ * 
+ * ## Eviction Strategy
+ * - Uses LRU ordering from the main cache list
+ * - Only evicts TOKENIZED_SEQUENCE entries
+ * - Continues until target memory reduction is achieved
+ * - Updates both memory counters and cache maps
+ * 
+ * ## Thread Safety
+ * Assumes caller holds appropriate locks for cache modification
+ */
+void llama_dataset_streaming_cache::evict_tokenized_entries(size_t target_memory_reduction) {
+    size_t memory_freed = 0;
+    
+    // Iterate from back (LRU) to front, evicting tokenized entries
+    auto it = cache_list.rbegin();
+    while (it != cache_list.rend() && memory_freed < target_memory_reduction) {
+        if (it->entry_type == CacheEntryType::TOKENIZED_SEQUENCE) {
+            size_t entry_size = it->size;
+            uint64_t sequence_id = it->sequence_id;
+            
+            // Free the data
+            free(it->data);
+            current_memory_bytes -= entry_size;
+            current_tokenization_memory_bytes -= entry_size;
+            memory_freed += entry_size;
+            
+            // Remove from tokenized cache map
+            tokenized_cache_map.erase(sequence_id);
+            
+            // Remove from cache list (convert reverse iterator to forward iterator)
+            auto forward_it = std::next(it).base();
+            it = std::reverse_iterator(cache_list.erase(forward_it));
+            
+            {
+                std::unique_lock stats_lock(stats_mutex);
+                ++eviction_count;
+            }
+            
+            LLAMA_LOG_DEBUG("Evicted tokenized sequence %zu (size: %zu bytes) for memory pressure\n", 
+                           sequence_id, entry_size);
+        } else {
+            ++it;
+        }
+    }
+    
+    LLAMA_LOG_DEBUG("Evicted %zu bytes of tokenized data (target: %zu bytes)\n", 
+                   memory_freed, target_memory_reduction);
 }

@@ -34,11 +34,11 @@
  * ```c
  * // Load a GGUF dataset
  * struct llama_dataset* dataset = llama_dataset_from_gguf(params);
- * 
+ *
  * // Access sequences
  * uint64_t count = llama_dataset_n_sequences(dataset);
  * const int32_t* tokens = llama_dataset_sequence(dataset, 0);
- * 
+ *
  * // Cleanup
  * llama_dataset_free(dataset);
  * ```
@@ -62,11 +62,11 @@
  * ## Integration with Other Modules
  *
  * This core interface integrates seamlessly with:
- * - **streaming/**: Provides streaming cache management and optimization
- * - **validation/**: Offers comprehensive dataset validation capabilities  
- * - **formats/**: Implements format-specific loading and conversion logic
- * - **platform/**: Ensures cross-platform compatibility and system integration
- * - **tools/**: Provides command-line utilities and analysis tools
+ * - **streaming: Provides streaming cache management and optimization
+ * - **validation: Offers comprehensive dataset validation capabilities
+ * - **formats: Implements format-specific loading and conversion logic
+ * - **platform: Ensures cross-platform compatibility and system integration
+ * - **tools: Provides command-line utilities and analysis tools
  *
  * ## Thread Safety
  *
@@ -90,8 +90,8 @@
  */
 
 #include <stdint.h>
-#include "ggml/include/ggml.h"
-#include "include/llama.h"
+#include "ggml.h"
+#include "llama.h"
 
 // Forward declarations for cross-module compatibility
 struct common_params;
@@ -110,11 +110,11 @@ extern "C" {
  *
  * This structure is opaque to the user and should only be accessed through the provided functions.
  * The internal implementation varies by format and includes:
- * 
+ *
  * - **GGUF datasets**: GGUF context, GGML context, and cached tensor pointers
  * - **Text datasets**: Tokenized sequences with llama model integration
  * - **Parquet datasets**: Apache Arrow integration with schema management
- * 
+ *
  * All formats support:
  * - Streaming capabilities with configurable caching
  * - Metadata management and access
@@ -132,10 +132,10 @@ struct llama_dataset;
  *
  * These standardized keys ensure consistent metadata access across all supported
  * formats and enable interoperability between different dataset sources.
- * 
+ *
  * ## Core Metadata Keys
  * The following keys are supported across all dataset formats:
- * 
+ *
  * ## Extended Metadata (Future)
  * Additional metadata keys planned for future implementation:
  * - training.dataset.source: string (optional) - URL or description of the data source
@@ -232,6 +232,32 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
  */
 #ifdef LLAMA_PARQUET
 struct llama_dataset * llama_dataset_from_parquet(const common_params * params);
+
+/**
+ * @brief Load a dataset from a Parquet file with tokenization support.
+ *
+ * This function extends the basic Parquet loading functionality to support real-time
+ * tokenization of raw text data stored in Parquet files. It can handle both pre-tokenized
+ * data and raw text, automatically detecting the content type and applying appropriate
+ * processing strategies.
+ *
+ * Key features:
+ * - Automatic schema analysis to detect text vs token columns
+ * - Real-time tokenization using the provided llama model
+ * - Streaming support with intelligent tokenization caching
+ * - Mixed content support (both text and pre-tokenized columns)
+ * - Memory-efficient processing with configurable cache limits
+ *
+ * @param params Common parameters including file path, streaming options, and tokenization configuration
+ * @param model Llama model to use for tokenization (required for text processing, can be NULL for pre-tokenized data)
+ * @return Pointer to the dataset, or NULL on error
+ * @see llama_dataset_set_tokenization_options() for configuration after loading
+ * @see llama_dataset_get_tokenization_stats() for performance monitoring
+ */
+struct llama_dataset * llama_dataset_from_parquet_with_tokenization(
+    const common_params * params,
+    struct llama_model * model
+);
 #endif
 /**
  * @brief Save a dataset to a GGUF file.
@@ -366,6 +392,72 @@ const char * llama_dataset_error_code_to_string(enum dataset_error code);
  * @brief Clear the error state.
  */
 void llama_dataset_clear_error(void);
+
+//
+// Tokenization Configuration and Monitoring Interface
+//
+// These functions provide comprehensive control over tokenization behavior and
+// performance monitoring for datasets that support text-to-token conversion.
+// They integrate with the streaming subsystem to provide optimal performance
+// and memory usage for tokenization operations.
+//
+
+/**
+ * @brief Configure tokenization options for a dataset.
+ *
+ * This function allows fine-tuning of tokenization behavior after dataset creation.
+ * It provides control over caching strategies, memory usage, and column selection
+ * for optimal performance based on specific use cases and system constraints.
+ *
+ * Configuration options include:
+ * - Tokenization cache enable/disable and size limits
+ * - Text and token column name specification
+ * - Memory pressure handling strategies
+ * - Batch processing parameters
+ *
+ * @param dataset Dataset to configure (must support tokenization)
+ * @param enable_caching Whether to enable tokenization result caching
+ * @param max_cache_size_mb Maximum cache size in megabytes (0 = unlimited, subject to memory pressure)
+ * @param text_column_name Name of the text column to tokenize (NULL = use default from params)
+ * @return true on success, false on error (check llama_dataset_get_error() for details)
+ * @see llama_dataset_get_tokenization_stats() for monitoring cache performance
+ */
+bool llama_dataset_set_tokenization_options(
+    struct llama_dataset * dataset,
+    bool enable_caching,
+    size_t max_cache_size_mb,
+    const char * text_column_name
+);
+
+/**
+ * @brief Get comprehensive tokenization statistics and performance metrics.
+ *
+ * This function provides detailed statistics about tokenization performance,
+ * cache efficiency, and memory usage. The metrics are useful for performance
+ * tuning, monitoring production systems, and debugging tokenization issues.
+ *
+ * Statistics include:
+ * - Total number of tokens processed across all sequences
+ * - Number of unique text strings processed (cache entries)
+ * - Cache hit ratio for performance assessment
+ * - Current memory usage by tokenization cache
+ * - Processing time statistics (if available)
+ *
+ * @param dataset Dataset to query (must support tokenization)
+ * @param total_tokens Pointer to store total number of tokens processed (can be NULL)
+ * @param unique_texts Pointer to store number of unique text strings processed (can be NULL)
+ * @param cache_hit_ratio Pointer to store cache hit ratio 0.0-1.0, higher is better (can be NULL)
+ * @param cache_memory_usage_bytes Pointer to store current cache memory usage in bytes (can be NULL)
+ * @return true on success, false on error or if tokenization is not supported
+ * @see llama_dataset_set_tokenization_options() for cache configuration
+ */
+bool llama_dataset_get_tokenization_stats(
+    const struct llama_dataset * dataset,
+    size_t * total_tokens,
+    size_t * unique_texts,
+    double * cache_hit_ratio,
+    size_t * cache_memory_usage_bytes
+);
 
 
 //

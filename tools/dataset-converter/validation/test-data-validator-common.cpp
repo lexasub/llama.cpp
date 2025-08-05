@@ -590,10 +590,10 @@ bool create_directory_if_missing(const char* path) {
  * @see test_data_file_info For size constraint specifications
  * @see test_data_validation_result For size validation result codes
  */
-uint64_t get_file_size(const char* path) {
+size_t get_file_size(const char* path) {
     struct stat st;
     if (stat(path, &st) == 0) {
-        return static_cast<uint64_t>(st.st_size);
+        return static_cast<size_t>(st.st_size);
     }
     return 0;
 }
