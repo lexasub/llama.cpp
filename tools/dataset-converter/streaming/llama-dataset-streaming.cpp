@@ -133,6 +133,7 @@
 #include "llama-dataset-internal.h"
 #include "llama-dataset-utils.h"
 #include "llama-dataset.h"
+#include "llama-dataset-error.h"
 #include "llama-impl.h"
 #include "streaming-cache.h"
 #include "streaming-optimization-manager.h"
@@ -321,16 +322,18 @@ static llama_dataset_stream_optimization_manager* llama_dataset_streaming_get_op
  * @see llama_dataset_get_streaming_stats() to monitor actual cache memory usage
  * @see llama_dataset_set_adaptive_cache_sizing() for automatic cache size management
  */
-bool llama_dataset_set_streaming_cache_size(struct llama_dataset* dataset, size_t cache_size_bytes) {
+extern "C" {
+
+bool llama_dataset_set_streaming_cache_size_internal(struct llama_dataset* dataset, size_t cache_size_bytes) {
     if (!dataset || !dataset->streaming) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
         return false;
     }
 
     // Get the streaming cache
     llama_dataset_streaming_cache* cache = dataset->streaming_cache;
     if (!cache) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
         return false;
     }
 
@@ -415,16 +418,16 @@ bool llama_dataset_set_streaming_cache_size(struct llama_dataset* dataset, size_
  * @see llama_dataset_set_adaptive_cache_sizing() for automatic memory management
  * @see streaming/streaming-read-ahead.h for detailed read-ahead implementation
  */
-bool llama_dataset_set_streaming_read_ahead(struct llama_dataset* dataset, bool enabled, size_t window_size) {
+bool llama_dataset_set_streaming_read_ahead_internal(struct llama_dataset* dataset, bool enabled, size_t window_size) {
     if (!dataset || !dataset->streaming) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
         return false;
     }
 
     // Get or create the optimization manager
     llama_dataset_stream_optimization_manager* manager = llama_dataset_streaming_get_optimization_manager(dataset);
     if (!manager) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Failed to initialize optimization manager");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Failed to initialize optimization manager");
         return false;
     }
 
@@ -523,16 +526,16 @@ bool llama_dataset_set_streaming_read_ahead(struct llama_dataset* dataset, bool 
  * @see streaming/streaming-memory-monitor.h for memory monitoring implementation
  * @see llama_dataset_set_streaming_cache_size() for manual cache size control
  */
-bool llama_dataset_set_adaptive_cache_sizing(struct llama_dataset* dataset, bool enabled) {
+bool llama_dataset_set_adaptive_cache_sizing_internal(struct llama_dataset* dataset, bool enabled) {
     if (!dataset || !dataset->streaming) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
         return false;
     }
 
     // Get the streaming cache
     llama_dataset_streaming_cache* cache = dataset->streaming_cache;
     if (!cache) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
         return false;
     }
 
@@ -627,21 +630,21 @@ bool llama_dataset_set_adaptive_cache_sizing(struct llama_dataset* dataset, bool
  * @see tools/streaming-optimization-analysis.cpp for detailed performance analysis tools
  * @see streaming/streaming-cache.h for detailed cache statistics structure
  */
-bool llama_dataset_get_streaming_stats(
+bool llama_dataset_get_streaming_stats_internal(
     const struct llama_dataset* dataset,
     double* hit_ratio,
     size_t* memory_usage_bytes,
     size_t* entry_count) {
 
     if (!dataset || !dataset->streaming) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
         return false;
     }
 
     // Get the streaming cache
     llama_dataset_streaming_cache* cache = dataset->streaming_cache;
     if (!cache) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Streaming cache not initialized");
         return false;
     }
 
@@ -663,3 +666,152 @@ bool llama_dataset_get_streaming_stats(
 
     return true;
 }
+
+/**
+ * @brief Initialize streaming infrastructure for a dataset.
+ *
+ * This function sets up the streaming cache and related infrastructure for a dataset
+ * that has been configured for streaming mode. It creates the cache with appropriate
+ * default settings and prepares the dataset for streaming operations.
+ *
+ * @param dataset Dataset to initialize (must be in streaming mode)
+ * @param cache_size_bytes Initial cache size in bytes (default: 64MB if 0)
+ * @return true on success, false on error
+ */
+bool llama_dataset_streaming_initialize_internal(struct llama_dataset* dataset, size_t cache_size_bytes) {
+    if (!dataset || !dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+
+    // Don't reinitialize if already initialized
+    if (dataset->streaming_cache) {
+        return true;
+    }
+
+    // Use default cache size if not specified
+    if (cache_size_bytes == 0) {
+        cache_size_bytes = 64 * 1024 * 1024; // 64MB default
+    }
+
+    // Create the streaming cache
+    try {
+        dataset->streaming_cache = new llama_dataset_streaming_cache(cache_size_bytes);
+    } catch (const std::exception& e) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to create streaming cache");
+        return false;
+    }
+
+    // Initialize optimization manager to nullptr - it will be created on-demand
+    dataset->optimization_manager = nullptr;
+
+    return true;
+}
+
+/**
+ * @brief Cleanup streaming infrastructure for a dataset.
+ *
+ * This function cleans up all streaming-related resources including the cache
+ * and optimization manager. It should be called during dataset cleanup.
+ *
+ * @param dataset Dataset to cleanup
+ */
+void llama_dataset_streaming_cleanup_internal(struct llama_dataset* dataset) {
+    if (!dataset) {
+        return;
+    }
+
+    // Cleanup optimization manager
+    if (dataset->optimization_manager) {
+        llama_dataset_stream_optimization_manager* manager = 
+            static_cast<llama_dataset_stream_optimization_manager*>(dataset->optimization_manager);
+        manager->stop();
+        delete manager;
+        dataset->optimization_manager = nullptr;
+    }
+
+    // Cleanup streaming cache
+    if (dataset->streaming_cache) {
+        delete dataset->streaming_cache;
+        dataset->streaming_cache = nullptr;
+    }
+}
+
+/**
+ * @brief Get streaming statistics for performance monitoring and analysis.
+ *
+ * This function retrieves comprehensive streaming statistics from the dataset's
+ * streaming subsystem, including cache performance metrics, memory usage information,
+ * and access pattern statistics. The statistics are essential for performance
+ * monitoring, optimization tuning, and diagnostic analysis.
+ *
+ * ## Statistics Provided
+ *
+ * ### Cache Performance
+ * - **Hit Ratio**: Percentage of cache hits vs. total accesses (0.0 to 1.0)
+ * - **Memory Usage**: Current memory consumption by the streaming cache in bytes
+ * - **Entry Count**: Number of entries currently stored in the cache
+ *
+ * ### Access Patterns
+ * - **Total Accesses**: Cumulative number of data access operations
+ * - **Cache Hits**: Number of successful cache lookups
+ * - **Cache Misses**: Number of cache misses requiring data loading
+ * - **Evictions**: Number of entries evicted due to memory pressure
+ *
+ * ## Usage Guidelines
+ *
+ * ### Performance Monitoring
+ * - Monitor hit ratio to assess cache effectiveness (target: >80% for sequential access)
+ * - Track memory usage to ensure it stays within configured limits
+ * - Use entry count to understand cache utilization patterns
+ *
+ * ### Optimization Tuning
+ * - Low hit ratios may indicate need for larger cache size or different eviction policy
+ * - High memory usage with low hit ratios suggests inefficient access patterns
+ * - Entry count vs. memory usage ratio indicates average entry size
+ *
+ * @param dataset Dataset to query (must be in streaming mode)
+ * @param hit_ratio Pointer to store cache hit ratio (0.0 to 1.0), can be NULL
+ * @param memory_usage_bytes Pointer to store current memory usage in bytes, can be NULL
+ * @param entry_count Pointer to store current number of cache entries, can be NULL
+ * @return true on success, false on error
+ *
+ * @note All output parameters are optional and can be NULL if not needed
+ * @note This function is thread-safe and can be called concurrently with data access
+ * @note Statistics are updated in real-time and reflect current cache state
+ *
+ * @see llama_dataset_set_streaming_cache_size() for cache configuration
+ * @see llama_dataset_set_adaptive_cache_sizing() for automatic optimization
+ * @see streaming/streaming-cache.h for detailed cache implementation
+ */
+bool llama_dataset_streaming_get_stats_internal(const struct llama_dataset* dataset, double* hit_ratio, size_t* memory_usage_bytes, size_t* entry_count) {
+    if (!dataset || !dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+
+    if (!dataset->streaming_cache) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Streaming cache not initialized");
+        return false;
+    }
+
+    // Get statistics from the streaming cache
+    llama_dataset_streaming_cache* cache = static_cast<llama_dataset_streaming_cache*>(dataset->streaming_cache);
+    auto stats = cache->get_stats();
+
+    // Populate output parameters
+    if (hit_ratio) {
+        *hit_ratio = stats.hit_ratio;
+    }
+    
+    if (memory_usage_bytes) {
+        *memory_usage_bytes = stats.current_memory;
+    }
+    
+    if (entry_count) {
+        *entry_count = stats.entry_count;
+    }
+
+    return true;
+}}
+ // extern "C"

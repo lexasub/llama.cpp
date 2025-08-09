@@ -181,7 +181,12 @@ enum dataset_error {
     DATASET_ERROR_STREAMING_NOT_SUPPORTED, ///< Streaming not supported for this format/file
     DATASET_ERROR_INVALID_PARAMETER,    ///< Invalid parameter passed to function
     DATASET_ERROR_CONTEXT_CREATION_FAILED, ///< Context creation failed (GGML/GGUF)
-    DATASET_ERROR_IO_ERROR              ///< General I/O error during file operations
+    DATASET_ERROR_IO_ERROR,             ///< General I/O error during file operations
+    DATASET_ERROR_REGISTRY_FULL,        ///< Registry capacity exceeded, cannot register more loaders
+    DATASET_ERROR_REGISTRY_DUPLICATE,   ///< Duplicate format loader registration attempted
+    DATASET_ERROR_REGISTRY_NOT_FOUND,   ///< Format loader not found in registry
+    DATASET_ERROR_REGISTRY_VALIDATION_FAILED, ///< Format loader validation failed during registration
+    DATASET_ERROR_UNKNOWN               ///< Unknown or unspecified error
 };
 
 //
@@ -393,6 +398,21 @@ const char * llama_dataset_error_code_to_string(enum dataset_error code);
  */
 void llama_dataset_clear_error(void);
 
+/**
+ * @brief Set an error message.
+ *
+ * @param message Error message to set
+ */
+void llama_dataset_set_error(const char * message);
+
+/**
+ * @brief Set an error message with a specific error code.
+ *
+ * @param code Error code
+ * @param message Error message to set
+ */
+void llama_dataset_set_error_with_code(enum dataset_error code, const char * message);
+
 //
 // Tokenization Configuration and Monitoring Interface
 //
@@ -468,19 +488,7 @@ bool llama_dataset_get_tokenization_stats(
 // the streaming and validation subsystems to provide comprehensive dataset management.
 //
 
-/**
- * @brief Load a dataset from a GGUF file with advanced streaming options.
- *
- * This function provides the advanced GGUF loading interface with comprehensive
- * streaming configuration. In streaming mode, tensor data is loaded on-demand
- * with intelligent caching and prefetching for optimal memory usage and performance.
- *
- * @param common_params Parameters including file path, streaming options, and cache configuration
- * @return Pointer to the dataset, or NULL on error
- * @see llama_dataset_from_gguf() for the simplified interface
- * @see streaming/streaming-cache.h for streaming implementation details
- */
-struct llama_dataset * llama_dataset_load_gguf(const common_params * common_params);
+// llama_dataset_load_gguf is implemented in formats/gguf/llama-dataset-gguf.h
 
 /**
  * @brief Get the length of a sequence in the dataset (legacy function).

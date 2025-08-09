@@ -1,3 +1,5 @@
+#include "llama-dataset.h"
+#include "llama-impl.h"
 #include "test_core_functionality.h"
 
 // Test GGUF factory function with valid and invalid inputs
@@ -47,9 +49,9 @@ void test_format_conversion() {
     TEST_ASSERT_NOT_NULL(dataset.get(), "source GGUF dataset");
 
     // Test round-trip conversion
-    TEST_ASSERT(test_dataset_conversion_roundtrip(dataset.get(), TEST_OUTPUT_GGUF), 
+    TEST_ASSERT(test_dataset_conversion_roundtrip(dataset.get(), TEST_OUTPUT_GGUF),
                 "Round-trip conversion should preserve data");
-    
+
     TEST_LOG_SUCCESS("Format conversion test passed");
 }
 

@@ -146,3 +146,18 @@ bool llama_dataset_init_tokenization_context(struct llama_dataset * dataset);
  * @return true if tokenization is available, false otherwise
  */
 bool llama_dataset_has_tokenization(const struct llama_dataset * dataset);
+/**
+ * @brief Cache tensors for efficient access.
+ *
+ * @param dataset Dataset to cache tensors for
+ * @return true on success, false on error
+ */
+bool llama_dataset_cache_tensors(struct llama_dataset* dataset);
+
+/**
+ * @brief Validate and optimize tensor cache.
+ *
+ * @param dataset Dataset to optimize
+ * @return true on success, false on error
+ */
+bool llama_dataset_validate_and_optimize_tensor_cache(struct llama_dataset* dataset);

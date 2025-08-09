@@ -21,7 +21,7 @@
  */
 #include <shared_mutex>
 #include <cstring>
-#include "platform/platform-compat.h"
+#include "../platform/platform-compat.h"
 #include "log.h"
 #include "llama.h"
 

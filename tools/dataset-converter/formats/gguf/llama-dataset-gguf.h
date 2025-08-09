@@ -146,6 +146,7 @@
 // Forward declarations for GGUF and GGML integration
 struct gguf_context;
 struct ggml_context;
+struct IFormatLoader;
 
 #ifdef __cplusplus
 extern "C" {
@@ -227,6 +228,63 @@ extern "C" {
  *          Do not store the pointer for extended periods without copying the data.
  */
 void * llama_dataset_gguf_get_tensor_data_streaming(const struct llama_dataset * dataset, uint64_t index);
+
+/**
+ * @brief Load a dataset from a GGUF file with advanced streaming and configuration options.
+ *
+ * This function provides the primary implementation for loading GGUF datasets with
+ * comprehensive support for both standard and streaming modes. It handles the complete
+ * lifecycle of GGUF dataset initialization including format validation, context creation,
+ * memory management, and streaming configuration.
+ *
+ * ## Loading Process Overview
+ *
+ * The loading process follows a carefully orchestrated sequence:
+ * 1. **Parameter Validation**: Validates input parameters and file accessibility
+ * 2. **Format Validation**: Comprehensive GGUF format validation and integrity checking
+ * 3. **Context Creation**: Creates GGUF and GGML contexts based on loading mode
+ * 4. **Tensor Management**: Configures tensor loading strategy (immediate vs. on-demand)
+ * 5. **Cache Initialization**: Sets up streaming cache and optimization components
+ * 6. **Metadata Extraction**: Extracts and caches GGUF metadata for efficient access
+ *
+ * ## Loading Modes
+ *
+ * ### Standard Mode (dataset_streaming = false)
+ * - **Memory Strategy**: All tensor data loaded into memory during initialization
+ * - **Performance**: Optimal access speed (~10-50 nanoseconds per sequence)
+ * - **Memory Usage**: Full dataset size in memory
+ * - **Use Case**: Small to medium datasets where memory usage is not a concern
+ * - **GGML Integration**: Full GGML context with all tensors allocated
+ *
+ * ### Streaming Mode (dataset_streaming = true)
+ * - **Memory Strategy**: Tensor data loaded on-demand with intelligent caching
+ * - **Performance**: Cache hits ~10-50 ns, cache misses ~1-10 ms
+ * - **Memory Usage**: Configurable cache size (default: adaptive)
+ * - **Use Case**: Large datasets or memory-constrained environments
+ * - **GGML Integration**: Lightweight context with metadata-only loading
+ *
+ * @param common_params Common parameters including file path and streaming configuration
+ * @return Pointer to the dataset, or NULL on error
+ *
+ * @note This function integrates with the streaming subsystem for optimal performance
+ * @note Error details can be retrieved using llama_dataset_get_error_message()
+ * @note The returned dataset must be freed using llama_dataset_free()
+ *
+ * @see llama_dataset_from_gguf() for the public factory function
+ * @see streaming/streaming-cache.h for streaming implementation details
+ * @see validation/llama-dataset-validation.h for validation capabilities
+ */
+struct llama_dataset * llama_dataset_load_gguf(const common_params * common_params);
+
+/**
+ * @brief Get the GGUF format loader interface.
+ *
+ * Returns the IFormatLoader interface implementation for GGUF format.
+ * Used by the registry system for format detection and loading.
+ *
+ * @return GGUF format loader interface
+ */
+const struct IFormatLoader* gguf_get_loader_interface(void);
 
 #ifdef __cplusplus
 }

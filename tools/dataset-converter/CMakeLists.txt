@@ -1,81 +1,80 @@
-cmake_minimum_required(VERSION 3.15)
-project(dataset-converter)
+# Dataset Converter CMake Configuration
 
-# Find required packages
-find_package(Threads REQUIRED)
-
-# Option to control the build of the dataset-converter tool
-option(PROJECT_BUILD_DATASET_CONVERTER "Build the dataset-converter tool" ON)
-
-if(NOT PROJECT_BUILD_DATASET_CONVERTER)
-    message(STATUS "Skipping build of dataset-converter tool.")
-    return()
-endif()
-
-# Set the C++ standard to 17
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Include common directories
-include_directories(.
-        ../../common
-        ../../
-        ../../src
-        ../../ggml/include
-        ../../include
-        ${CMAKE_CURRENT_SOURCE_DIR}/formats/gguf
-        ${CMAKE_CURRENT_SOURCE_DIR}/formats/parquet
-        ${CMAKE_CURRENT_SOURCE_DIR}/formats/text
-        ${CMAKE_CURRENT_SOURCE_DIR}/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/streaming
-        ${CMAKE_CURRENT_SOURCE_DIR}/safety
-        ${CMAKE_CURRENT_SOURCE_DIR}/validation
-        ${CMAKE_CURRENT_SOURCE_DIR}/platform)
-
-# Include modular CMake files for each component
-add_subdirectory(core)
+# Add format subdirectories
 add_subdirectory(formats/gguf)
 add_subdirectory(formats/text)
-add_subdirectory(formats/parquet)
-add_subdirectory(streaming)
-add_subdirectory(validation)
-add_subdirectory(platform)
 
-# Create the main dataset converter library as an interface library
-add_library(dataset_convert_lib INTERFACE)
+# Add tests subdirectory
+add_subdirectory(tests)
 
-# Link all module libraries to the main library
-target_link_libraries(dataset_convert_lib INTERFACE
-    dataset_core
+# Add dataset converter core library
+add_library(llama-dataset-core
+    core/llama-dataset-registry.cpp
+    core/llama-dataset-error.cpp
+    core/llama-dataset-metadata.cpp
+    core/llama-dataset-validation.cpp
+)
+
+target_include_directories(llama-dataset-core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
+)
+
+target_link_libraries(llama-dataset-core PUBLIC
+    common
     dataset_gguf_format
     dataset_text_format
-    dataset_streaming
-    dataset_validation
-    dataset_platform
-    llama
+)
+
+# Add format registry test
+add_executable(test-format-registry
+    tests/test_format_registry.cpp
+)
+
+target_include_directories(test-format-registry PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
+)
+
+target_link_libraries(test-format-registry PRIVATE
+    llama-dataset-core
     common
-    Threads::Threads
-    ggml
 )
 
-# Link Parquet format library if available
-if(LLAMA_PARQUET)
-    target_link_libraries(dataset_convert_lib INTERFACE dataset_parquet_format)
-endif()
-
-# Define the executable target
-add_executable(dataset_converter "${CMAKE_CURRENT_SOURCE_DIR}/tools/convert-to-gguf.cpp")
-target_link_libraries(dataset_converter PRIVATE dataset_convert_lib)
-
-add_executable(streaming_analyzer "${CMAKE_CURRENT_SOURCE_DIR}/tools/streaming-optimization-analysis.cpp")
-target_link_libraries(streaming_analyzer PRIVATE dataset_convert_lib)
-
-add_executable(test_data_validator "${CMAKE_CURRENT_SOURCE_DIR}/tools/test-data-validation-tool.cpp")
-target_link_libraries(test_data_validator PRIVATE dataset_convert_lib)
-
-install(TARGETS dataset_converter streaming_analyzer test_data_validator
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+# Add validation test executable
+add_executable(test-validation-enhanced
+    tests/test_validation_enhanced.cpp
 )
 
-# Include tests subdirectory
-add_subdirectory(tests)
+target_include_directories(test-validation-enhanced PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
+)
+
+target_link_libraries(test-validation-enhanced PRIVATE
+    llama-dataset-core
+    common
+    gtest
+    gtest_main
+    gmock
+)
+
+# Add validation command-line tool
+add_executable(llama-dataset-validate
+    tools/llama-dataset-validate.cpp
+)
+
+target_include_directories(llama-dataset-validate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common
+)
+
+target_link_libraries(llama-dataset-validate PRIVATE
+    llama-dataset-core
+    common
+)
+
+# Add test to CTest
+enable_testing()
+add_test(NAME format-registry COMMAND test-format-registry)
+add_test(NAME validation-enhanced COMMAND test-validation-enhanced)

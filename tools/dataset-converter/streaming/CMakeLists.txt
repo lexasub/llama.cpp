@@ -39,8 +39,9 @@ if(NOT TARGET Threads::Threads)
     find_package(Threads REQUIRED)
 endif()
 
-# Link core dependencies
+# Link core dependencies and cross-module dependencies
 target_link_libraries(dataset_streaming PRIVATE
+    dataset_core
     llama
     ggml
     ggml-base

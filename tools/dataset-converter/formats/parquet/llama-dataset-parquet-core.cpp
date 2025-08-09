@@ -1236,3 +1236,9 @@ size_t estimate_tensor_cache_memory_usage(const struct ggml_tensor * tensor) {
 }
 
 #endif // LLAMA_PARQUET
+// Implementation of Parquet loader function for core module
+extern "C" struct llama_dataset* llama_dataset_load_parquet_internal(const struct common_params* params) {
+    // TODO: Implement Parquet loading
+    (void)params;
+    return nullptr; // Placeholder
+}

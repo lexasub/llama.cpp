@@ -377,6 +377,38 @@ bool fix_file_permissions_core(const char* path);
  */
 bool check_file_readable_core(const char* path);
 
+/**
+ * @brief Check if a directory is accessible for read/write operations.
+ *
+ * Verifies that the specified directory exists and has appropriate permissions
+ * for test data operations. This function checks both read and write access
+ * to ensure full functionality.
+ *
+ * @param path Path to the directory to check
+ * @return true if directory is accessible for read/write operations
+ *
+ * @note The function checks for both read and write permissions
+ * @note Returns false if the directory doesn't exist
+ * @note The function is safe to call multiple times
+ */
+bool check_directory_accessible_core(const char* path);
+
+/**
+ * @brief Create directory structure for test data files.
+ *
+ * Creates the necessary directory structure for test data files, including
+ * parent directories if they don't exist. Sets appropriate permissions
+ * for test data operations.
+ *
+ * @param path Path to the directory structure to create
+ * @return true if directory structure was created successfully
+ *
+ * @note The function is idempotent - safe to call multiple times
+ * @note Creates parent directories recursively as needed
+ * @note Sets appropriate permissions for test data operations
+ */
+bool create_directory_structure_core(const char* path);
+
 //
 // Core error handling and utility functions
 //

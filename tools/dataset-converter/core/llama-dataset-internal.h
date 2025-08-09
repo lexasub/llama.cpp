@@ -133,8 +133,8 @@
  */
 
 #include "llama-dataset.h"
-#include "ggml/include/gguf.h"
-#include "ggml/include/ggml.h"
+#include "gguf.h"
+#include "ggml.h"
 #include "llama.h"
 
 #ifdef __cplusplus

@@ -1,12 +1,12 @@
 #include "llama-dataset-utils.h"
+#include "llama-dataset-error.h"
 
-#include "platform/platform-compat.h"
+#include "../platform/platform-compat.h"
 #include "common.h"
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 #include "llama.h"
-#include "streaming-cache.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,57 +14,8 @@
 #include <string>
 #include <vector>
 
-// Thread-local error state
-static THREAD_LOCAL struct {
-    enum dataset_error code;
-    char message[512];
-    bool has_error;
-} g_error_state = {DATASET_SUCCESS, {0}, false};
-
-// Error handling functions
-void llama_dataset_set_error_with_code(enum dataset_error code, const char* msg) {
-    if (!msg) {
-        msg = "Unknown error (null message)";
-    }
-
-    g_error_state.code = code;
-
-    // Use safer string copying with proper bounds checking
-    size_t msg_len = strlen(msg);
-    size_t max_len = sizeof(g_error_state.message) - 1;
-
-    if (msg_len > max_len) {
-        // Truncate message if too long
-        memcpy(g_error_state.message, msg, max_len);
-        g_error_state.message[max_len] = '\0';
-    } else {
-        strcpy(g_error_state.message, msg);
-    }
-
-    g_error_state.has_error = true;
-
-    LLAMA_LOG_ERROR("%s\n", g_error_state.message);
-}
-
-void llama_dataset_set_error(const char* msg) {
-    llama_dataset_set_error_with_code(DATASET_ERROR_INVALID_PARAMETER, msg);
-}
-
-const char* llama_dataset_get_error(void) {
-    return g_error_state.has_error ? g_error_state.message : nullptr;
-}
-
-bool llama_dataset_has_error(void) {
-    return g_error_state.has_error;
-}
-
-const char* llama_dataset_get_error_message(void) {
-    return g_error_state.has_error ? g_error_state.message : "";
-}
-
-enum dataset_error llama_dataset_get_error_code(void) {
-    return g_error_state.code;
-}
+// Error handling functions are now implemented in llama-dataset-core.cpp
+// This file contains utility functions that use the centralized error system
 
 const char* llama_dataset_error_code_to_string(enum dataset_error code) {
     switch (code) {
@@ -91,54 +42,20 @@ const char* llama_dataset_error_code_to_string(enum dataset_error code) {
     }
 }
 
-void llama_dataset_clear_error() {
-    g_error_state.code = DATASET_SUCCESS;
-    g_error_state.message[0] = '\0';
-    g_error_state.has_error = false;
-}
+// llama_dataset_clear_error is now implemented in llama-dataset-core.cpp
 
-struct llama_dataset* llama_dataset_alloc(enum dataset_type type, bool streaming) {
-    struct llama_dataset* dataset = static_cast<struct llama_dataset *>(malloc(sizeof(struct llama_dataset)));
-    if (!dataset) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate dataset structure");
-        return nullptr;
-    }
+// llama_dataset_alloc moved to llama-dataset-core.cpp to avoid streaming dependencies
 
-    // Initialize all fields to zero/null using proper C++ initialization
-    *dataset = {};
-
-    // Set type and streaming flag
-    dataset->type = type;
-    dataset->streaming = streaming;
-
-    // Initialize tokenization fields
-    dataset->model = nullptr;
-    dataset->tokenizer_ctx = nullptr;
-    dataset->owns_model = false;
-
-    // Initialize streaming cache if in streaming mode
-    if (streaming) {
-        dataset->streaming_cache = new llama_dataset_streaming_cache(64 * 1024 * 1024); // 64MB default
-        if (!dataset->streaming_cache) {
-            llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming cache");
-            free(dataset);
-            return nullptr;
-        }
-
-        // Initialize optimization manager to nullptr (will be created on demand)
-        dataset->optimization_manager = nullptr;
-    }
-
-    return dataset;
-}
+// Forward declaration for internal allocation function
+extern struct llama_dataset* llama_dataset_alloc_internal(enum dataset_type type, bool streaming);
 
 struct llama_dataset* llama_dataset_create(void) {
-    return llama_dataset_alloc(DATASET_GGUF, false);
+    return llama_dataset_alloc_internal(DATASET_GGUF, false);
 }
 
 bool llama_dataset_cache_tensors(struct llama_dataset* dataset) {
     if (!dataset || !dataset->ctx) {
-        llama_dataset_set_error("Invalid dataset for tensor caching");
+        llama_dataset_error_set_internal("Invalid dataset for tensor caching");
         return false;
     }
 
@@ -154,7 +71,7 @@ bool llama_dataset_cache_tensors(struct llama_dataset* dataset) {
     // Allocate tensor pointer array
     dataset->cached_tensors = static_cast<struct ggml_tensor **>(malloc(n_tensors * sizeof(struct ggml_tensor *)));
     if (!dataset->cached_tensors) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor cache");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor cache");
         return false;
     }
 
@@ -186,7 +103,7 @@ bool llama_dataset_cache_tensors(struct llama_dataset* dataset) {
                 // This will be used to store streaming data when loaded
                 dataset->cached_tensors[i] = static_cast<struct ggml_tensor *>(calloc(1, sizeof(struct ggml_tensor)));
                 if (!dataset->cached_tensors[i]) {
-                    llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming tensor placeholder");
+                    llama_dataset_error_set_with_code_internal(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate streaming tensor placeholder");
                     return false;
                 }
                 // Initialize tensor metadata but not data (data will be loaded on demand)
@@ -245,7 +162,7 @@ bool llama_dataset_equal(struct llama_dataset* dataset1, struct llama_dataset* d
 
 bool llama_dataset_validate_gguf_conversion(struct llama_dataset* original, const char* gguf_path) {
     if (!original || !gguf_path) {
-        llama_dataset_set_error("Invalid parameters for GGUF validation");
+        llama_dataset_error_set_internal("Invalid parameters for GGUF validation");
         return false;
     }
 
@@ -274,7 +191,7 @@ struct ggml_tensor* llama_dataset_create_sequence_tensor(struct ggml_context* gg
                                          const char* tensor_name,
                                          int32_t pad_to_length) {
     if (!ggml_ctx || !tokens || n_tokens <= 0 || !tensor_name) {
-        llama_dataset_set_error("Invalid parameters for tensor creation");
+        llama_dataset_error_set_internal("Invalid parameters for tensor creation");
         return nullptr;
     }
 
@@ -284,7 +201,7 @@ struct ggml_tensor* llama_dataset_create_sequence_tensor(struct ggml_context* gg
     // Create tensor
     struct ggml_tensor* tensor = ggml_new_tensor_1d(ggml_ctx, GGML_TYPE_I32, final_length);
     if (!tensor) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor");
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate tensor");
         return nullptr;
     }
 
@@ -333,7 +250,7 @@ enum dataset_type llama_dataset_get_type(const struct llama_dataset* dataset) {
 
 bool llama_dataset_validate_and_optimize_tensor_cache(struct llama_dataset* dataset) {
     if (!dataset || !dataset->cached_tensors) {
-        llama_dataset_set_error("Invalid dataset for tensor cache optimization");
+        llama_dataset_error_set_internal("Invalid dataset for tensor cache optimization");
         return false;
     }
 
@@ -356,12 +273,12 @@ bool llama_dataset_set_tokenization_model(struct llama_dataset * dataset,
                                          struct llama_model * model,
                                          bool take_ownership) {
     if (!dataset) {
-        llama_dataset_set_error("Dataset cannot be null");
+        llama_dataset_error_set_internal("Dataset cannot be null");
         return false;
     }
 
     if (!model) {
-        llama_dataset_set_error("Model cannot be null");
+        llama_dataset_error_set_internal("Model cannot be null");
         return false;
     }
 
@@ -385,12 +302,12 @@ bool llama_dataset_set_tokenization_model(struct llama_dataset * dataset,
 
 bool llama_dataset_init_tokenization_context(struct llama_dataset * dataset) {
     if (!dataset) {
-        llama_dataset_set_error("Dataset cannot be null");
+        llama_dataset_error_set_internal("Dataset cannot be null");
         return false;
     }
 
     if (!dataset->model) {
-        llama_dataset_set_error("Model must be set before initializing tokenization context");
+        llama_dataset_error_set_internal("Model must be set before initializing tokenization context");
         return false;
     }
 
@@ -411,7 +328,7 @@ bool llama_dataset_init_tokenization_context(struct llama_dataset * dataset) {
     // Create tokenization context
     dataset->tokenizer_ctx = llama_init_from_model(dataset->model, ctx_params);
     if (!dataset->tokenizer_ctx) {
-        llama_dataset_set_error_with_code(DATASET_ERROR_CONTEXT_CREATION_FAILED,
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_CONTEXT_CREATION_FAILED,
                                         "Failed to create tokenization context");
         return false;
     }

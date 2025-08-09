@@ -1,217 +1,267 @@
-# Dataset Converter Tests CMake Configuration
-# This file defines the build configuration for dataset converter tests
+# CMakeLists.txt for dataset converter tests
+# Comprehensive test infrastructure for the dataset converter framework
 
-# Enable testing
+cmake_minimum_required(VERSION 3.14)
+
+# Test configuration
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Find required packages
+find_package(GTest REQUIRED)
+find_package(Threads REQUIRED)
+
+# Include directories
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../formats
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+# Mock format loader library
+add_library(mock_format_loader STATIC
+    mock_format_loader.cpp
+    mock_format_loader.h
+)
+
+target_link_libraries(mock_format_loader
+    llama-dataset-core
+    llama-dataset-error
+    llama-dataset-registry
+)
+
+# Core module tests
+add_executable(test_core_module
+    test_core_module.cpp
+)
+
+target_link_libraries(test_core_module
+    mock_format_loader
+    llama-dataset-core
+    llama-dataset-error
+    llama-dataset-registry
+    llama-dataset-metadata
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+
+# Mock loader validation tests
+add_executable(test_mock_loader
+    test_mock_loader.cpp
+)
+
+target_link_libraries(test_mock_loader
+    mock_format_loader
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+
+# Error handling integration tests
+add_executable(test_error_integration
+    test_error_integration.cpp
+)
+
+target_link_libraries(test_error_integration
+    mock_format_loader
+    llama-dataset-core
+    llama-dataset-error
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+
+# Registry system tests
+add_executable(test_registry_integration
+    test_registry_integration.cpp
+)
+
+target_link_libraries(test_registry_integration
+    mock_format_loader
+    llama-dataset-registry
+    llama-dataset-error
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+
+# Add tests to CTest
 enable_testing()
 
-# Ensure all new test modules are properly discovered
-# New test modules created during refactoring:
-# - test_gguf_functionality.cpp (GGUF format tests)
-# - test_parquet_functionality.cpp (Parquet format tests)
-# - test_streaming_functionality.cpp (Streaming tests)
-# - test_validation_functionality.cpp (Validation tests)
-message(STATUS "Configuring dataset converter test modules...")
+add_test(NAME CoreModuleTests COMMAND test_core_module)
+add_test(NAME MockLoaderTests COMMAND test_mock_loader)
+add_test(NAME ErrorIntegrationTests COMMAND test_error_integration)
+add_test(NAME RegistryIntegrationTests COMMAND test_registry_integration)
 
-# Function to create monitored test execution
-function(add_monitored_test TEST_NAME TEST_EXECUTABLE)
-    add_custom_target(monitor-${TEST_NAME}
-        COMMAND ${CMAKE_COMMAND} -E echo "========================================"
-        COMMAND ${CMAKE_COMMAND} -E echo "Core Dataset Functionality Test Analysis"
-        COMMAND ${CMAKE_COMMAND} -E echo "========================================"
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "=== Testing: ${TEST_NAME} ==="
-        COMMAND ${CMAKE_COMMAND} -E echo "Executable: ${TEST_EXECUTABLE}"
-        COMMAND ${CMAKE_COMMAND} -E echo "✅ Executable exists and is runnable"
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "--- Execution Output ---"
-        COMMAND ${CMAKE_COMMAND} -E time ${TEST_EXECUTABLE}
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "✅ Test execution completed"
-        DEPENDS ${TEST_EXECUTABLE}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Running monitored test for ${TEST_NAME}"
+# Test properties
+set_tests_properties(CoreModuleTests PROPERTIES
+    TIMEOUT 30
+    LABELS "core;unit"
+)
+
+set_tests_properties(MockLoaderTests PROPERTIES
+    TIMEOUT 10
+    LABELS "mock;unit"
+)
+
+set_tests_properties(ErrorIntegrationTests PROPERTIES
+    TIMEOUT 15
+    LABELS "error;integration"
+)
+
+set_tests_properties(RegistryIntegrationTests PROPERTIES
+    TIMEOUT 15
+    LABELS "registry;integration"
+)
+
+# Coverage configuration (if enabled)
+if(ENABLE_COVERAGE)
+    include(CodeCoverage)
+    append_coverage_compiler_flags()
+    
+    setup_target_for_coverage_gcovr_html(
+        NAME coverage_tests
+        EXECUTABLE ctest
+        DEPENDENCIES test_core_module test_mock_loader test_error_integration test_registry_integration
+        BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../
+        EXCLUDE "tests/*" "build/*" "external/*"
     )
-endfunction()
-
-# Function to create streaming test execution
-function(add_streaming_test TEST_NAME TEST_EXECUTABLE)
-    add_custom_target(streaming-${TEST_NAME}
-        COMMAND ${CMAKE_COMMAND} -E echo "========================================"
-        COMMAND ${CMAKE_COMMAND} -E echo "Streaming Functionality Test Analysis"
-        COMMAND ${CMAKE_COMMAND} -E echo "========================================"
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "=== Testing: ${TEST_NAME} ==="
-        COMMAND ${CMAKE_COMMAND} -E echo "Executable: ${TEST_EXECUTABLE}"
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "--- Execution with Memory Monitoring ---"
-        COMMAND ${CMAKE_COMMAND} -E time ${TEST_EXECUTABLE}
-        COMMAND ${CMAKE_COMMAND} -E echo ""
-        COMMAND ${CMAKE_COMMAND} -E echo "✅ Streaming test execution completed"
-        DEPENDS ${TEST_EXECUTABLE}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Running streaming test for ${TEST_NAME}"
-    )
-endfunction()
-
-# Enhanced test function that uses CMake commands instead of shell scripts
-function(add_test_target TEST_SRC)
-    get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
-
-    # Create clearer test names using directory prefixes
-    file(RELATIVE_PATH REL_TEST_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${TEST_SRC})
-    get_filename_component(TEST_DIR ${REL_TEST_PATH} DIRECTORY)
-
-    # Generate clear test target name with dataset prefix and directory
-    if(TEST_DIR MATCHES "unit")
-        set(TARGET_NAME "dataset_unit_${TEST_NAME}")
-    elseif(TEST_DIR MATCHES "integration")
-        set(TARGET_NAME "dataset_integration_${TEST_NAME}")
-    elseif(TEST_DIR MATCHES "streaming")
-        set(TARGET_NAME "dataset_streaming_${TEST_NAME}")
-    else()
-        set(TARGET_NAME "dataset_${TEST_NAME}")
-    endif()
-
-    # Check if this test needs utilities (functionality tests or integration tests)
-    if(${TEST_SRC} MATCHES "test_.*_functionality\\.cpp" OR ${TEST_SRC} MATCHES "integration" OR ${TEST_SRC} MATCHES "streaming")
-        # Add the utilities source file for tests that need shared utilities
-        add_executable(${TARGET_NAME} ${TEST_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/test_core_functionality_utils.cpp)
-    else()
-        add_executable(${TARGET_NAME} ${TEST_SRC})
-    endif()
-
-    target_link_libraries(${TARGET_NAME} PRIVATE dataset_convert_lib common llama ggml)
-
-    # Ensure proper linking for new test modules
-    if(${TEST_SRC} MATCHES "test_.*_functionality\\.cpp")
-        # Additional linking for functionality test modules
-        target_include_directories(${TARGET_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../core
-            ${CMAKE_CURRENT_SOURCE_DIR}/../formats
-            ${CMAKE_CURRENT_SOURCE_DIR}/../streaming
-            ${CMAKE_CURRENT_SOURCE_DIR}/../validation
-        )
-
-        # Link format-specific libraries based on test type
-        if(${TEST_SRC} MATCHES "parquet" AND LLAMA_PARQUET)
-            target_link_libraries(${TARGET_NAME} PRIVATE dataset_parquet_format)
-        endif()
-    endif()
-
-    set_target_properties(${TARGET_NAME} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-
-    # Use CMake commands instead of shell script execution
-    add_test(
-        NAME ${TARGET_NAME}
-        COMMAND ${CMAKE_COMMAND}
-            -DTEST_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}
-            -DWORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/run_dataset_test.cmake
-    )
-
-    # Add monitored test target for this test
-    add_monitored_test(${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME})
-
-    # Add streaming test target if it's a streaming test
-    if(${TEST_SRC} MATCHES "streaming")
-        add_streaming_test(${TARGET_NAME} ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME})
-    endif()
-endfunction()
-
-# Gather all test source files with conditional Parquet support
-file(GLOB_RECURSE UNIT_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/unit/*.cpp")
-file(GLOB_RECURSE INTEGRATION_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/integration/*.cpp")
-file(GLOB_RECURSE STREAMING_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/streaming/*.cpp")
-
-# Combine all test sources
-set(TEST_SOURCES ${UNIT_TEST_SOURCES} ${INTEGRATION_TEST_SOURCES} ${STREAMING_TEST_SOURCES})
-
-# Filter out Parquet-related tests if LLAMA_PARQUET is not enabled
-if(NOT LLAMA_PARQUET)
-    list(FILTER TEST_SOURCES EXCLUDE REGEX ".*parquet.*")
-    list(FILTER TEST_SOURCES EXCLUDE REGEX ".*arrow.*")
-    message(STATUS "LLAMA_PARQUET is disabled, excluding Parquet-related tests")
-else()
-    message(STATUS "LLAMA_PARQUET is enabled, including all tests")
 endif()
 
-# Create test targets for all test sources
-foreach(TEST_SRC ${TEST_SOURCES})
-    # Skip utility files that don't contain main functions
-    if(${TEST_SRC} MATCHES ".*_utils\\.cpp$")
-        continue()
-    endif()
+# Valgrind configuration (if available)
+find_program(VALGRIND_PROGRAM valgrind)
+if(VALGRIND_PROGRAM)
+    add_custom_target(valgrind_tests
+        COMMAND ${VALGRIND_PROGRAM} --tool=memcheck --leak-check=full --show-leak-kinds=all 
+                --track-origins=yes --verbose --error-exitcode=1 
+                $<TARGET_FILE:test_core_module>
+        DEPENDS test_core_module
+        COMMENT "Running core module tests under Valgrind"
+    )
+endif()
 
-    # Skip Parquet tests if support is not available
-    if(NOT LLAMA_PARQUET AND (${TEST_SRC} MATCHES "parquet" OR ${TEST_SRC} MATCHES "arrow"))
-        continue()
-    endif()
+# Documentation generation for tests (disabled - no Doxyfile.in available)
+# find_program(DOXYGEN_PROGRAM doxygen)
+# if(DOXYGEN_PROGRAM)
+#     configure_file(
+#         ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
+#         ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+#         @ONLY
+#     )
+#     
+#     add_custom_target(test_docs
+#         COMMAND ${DOXYGEN_PROGRAM} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+#         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+#         COMMENT "Generating test documentation with Doxygen"
+#     )
+# endif()
 
-    add_test_target(${TEST_SRC})
-endforeach()
-
-# Custom targets for comprehensive testing
-add_custom_target(dataset-test-analysis
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/dataset_analysis.cmake
-    DEPENDS generate-test-data
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Running comprehensive dataset test analysis"
+# Performance validation tests
+add_executable(test_performance_validation
+    test_performance_validation.cpp
 )
 
-add_custom_target(analyze-core-tests
-    COMMAND ${CMAKE_COMMAND}
-        -DWORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
-        -DTEST_EXECUTABLES="${CMAKE_CURRENT_BINARY_DIR}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/analyze_core_tests.cmake
-    DEPENDS generate-test-data
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Analyzing core dataset functionality tests"
+target_link_libraries(test_performance_validation
+    mock_format_loader
+    llama-dataset-core
+    llama-dataset-error
+    llama-dataset-registry
+    Threads::Threads
 )
 
-add_custom_target(run-monitored-tests
-    COMMAND ${CMAKE_COMMAND}
-        -DWORKING_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
-        -DTEST_EXECUTABLES="${CMAKE_CURRENT_BINARY_DIR}"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/run_monitored_tests.cmake
-    DEPENDS generate-test-data
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Running monitored streaming functionality tests"
+# Performance benchmark suite
+add_executable(benchmark_performance
+    benchmark_performance.cpp
 )
 
-add_custom_target(setup-dataset-environment
-    COMMAND ${CMAKE_COMMAND} -E echo "Setting up dataset converter environment..."
-    COMMAND ${CMAKE_COMMAND} -E make_directory test_data
-    COMMAND ${CMAKE_COMMAND} -E make_directory test_output
-    COMMAND ${CMAKE_COMMAND} -E make_directory temp
-    COMMAND ${CMAKE_COMMAND} -E echo "Environment setup completed"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Setting up dataset converter environment"
+target_link_libraries(benchmark_performance
+    mock_format_loader
+    llama-dataset-core
+    llama-dataset-error
+    llama-dataset-registry
+    Threads::Threads
 )
 
-add_custom_target(generate-datasets
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/generate_datasets.cmake
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating comprehensive test datasets"
+# Add performance tests to CTest
+add_test(NAME PerformanceValidationTests COMMAND test_performance_validation)
+set_tests_properties(PerformanceValidationTests PROPERTIES
+    TIMEOUT 120
+    LABELS "performance;validation"
 )
 
-add_custom_target(run-all-dataset-tests
-    COMMAND ${CMAKE_COMMAND} -E echo "Running comprehensive dataset converter tests..."
-    DEPENDS analyze-core-tests run-monitored-tests dataset-test-analysis generate-datasets
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Running all dataset converter tests"
+# Performance benchmark (not run by default in CTest)
+add_test(NAME PerformanceBenchmark COMMAND benchmark_performance --iterations 50)
+set_tests_properties(PerformanceBenchmark PROPERTIES
+    TIMEOUT 300
+    LABELS "benchmark;performance"
 )
 
-# Verification target to ensure all new test modules build correctly
-add_custom_target(verify-test-modules
-    COMMAND ${CMAKE_COMMAND} -E echo "Verifying all test modules build correctly..."
-    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_gguf_functionality.cpp"
-    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_parquet_functionality.cpp"
-    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_streaming_functionality.cpp"
-    COMMAND ${CMAKE_COMMAND} -E echo "✅ test_validation_functionality.cpp"
-    COMMAND ${CMAKE_COMMAND} -E echo "All new test modules configured successfully"
-    DEPENDS dataset_unit_test_gguf_functionality dataset_unit_test_parquet_functionality dataset_unit_test_streaming_functionality dataset_unit_test_validation_functionality
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Verifying new test module configuration"
+# Performance benchmarking (optional)
+if(BUILD_BENCHMARKS)
+    find_package(benchmark REQUIRED)
+    
+    add_executable(benchmark_core_module
+        benchmark_core_module.cpp
+    )
+    
+    target_link_libraries(benchmark_core_module
+        mock_format_loader
+        llama-dataset-core
+        benchmark::benchmark
+        benchmark::benchmark_main
+    )
+    
+    add_test(NAME CoreModuleBenchmarks COMMAND benchmark_core_module)
+endif()
+
+# Simple performance test (no external dependencies)
+add_executable(test_performance_simple
+    test_performance_simple.cpp
+)
+
+target_link_libraries(test_performance_simple
+    Threads::Threads
+)
+
+# Add performance test to CTest
+add_test(NAME PerformanceSimple COMMAND test_performance_simple)
+set_tests_properties(PerformanceSimple PROPERTIES
+    TIMEOUT 60
+    LABELS "performance;simple"
+)
+
+# Install test executables (optional)
+if(INSTALL_TESTS)
+    install(TARGETS test_core_module test_mock_loader test_error_integration test_registry_integration test_performance_simple
+        RUNTIME DESTINATION bin/tests
+    )
+    
+    install(FILES
+        mock_format_loader.h
+        DESTINATION include/tests
+    )
+endif()
+# Simple architecture integration test for D3 task (no external dependencies)
+add_executable(test-architecture-integration-simple test_architecture_integration_simple.cpp)
+# No external libraries needed - this is a self-contained validation test
+install(TARGETS test-architecture-integration-simple RUNTIME)
+add_test(NAME architecture-integration-simple COMMAND test-architecture-integration-simple)
+
+# Minimal streaming tokenization test for E1 task completion
+add_executable(test_streaming_tokenization_minimal
+    test_streaming_tokenization_minimal.cpp
+)
+
+target_link_libraries(test_streaming_tokenization_minimal
+    Threads::Threads
+)
+
+# Add minimal streaming tokenization test to CTest
+add_test(NAME StreamingTokenizationMinimal COMMAND test_streaming_tokenization_minimal)
+set_tests_properties(StreamingTokenizationMinimal PROPERTIES
+    TIMEOUT 120
+    LABELS "streaming;tokenization;minimal;e1"
 )

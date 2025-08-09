@@ -4,6 +4,7 @@
 # Define text module source files
 set(TEXT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-text-loader.cpp
 )
 
 # Define text module header files
@@ -27,7 +28,7 @@ target_include_directories(dataset_text_format PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
 )
 
-# Link core dependencies
+# Link core dependencies and cross-module dependencies
 target_link_libraries(dataset_text_format PRIVATE
     llama
     ggml
@@ -42,3 +43,29 @@ set_target_properties(dataset_text_format PROPERTIES
 
 # Export variables for parent CMakeLists.txt
 set(TEXT_FORMAT_LIBRARY dataset_text_format PARENT_SCOPE)
+
+# Add text loader interface test
+add_executable(test-text-loader-interface
+    test_text_loader.cpp
+)
+
+target_include_directories(test-text-loader-interface PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+)
+
+target_link_libraries(test-text-loader-interface PRIVATE
+    dataset_text_format
+    llama-dataset-core
+    common
+)
+
+# Set target properties for test
+set_target_properties(test-text-loader-interface PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)

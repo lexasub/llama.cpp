@@ -229,6 +229,15 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstring>
+#include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
+#include <sys/stat.h>
+#include <errno.h>
+#endif
 
 //
 // Core validation orchestration functions
@@ -689,4 +698,145 @@ void log_validation_error_core(const char* path, enum test_data_validation_resul
     }
 
     LLAMA_LOG_DEBUG("Validation error for %s: %s\n", path, test_data_validation_result_to_string(result));
+}
+/**
+ * @brief Check if a directory is accessible for read/write operations.
+ *
+ * Verifies that the specified directory exists and has appropriate permissions
+ * for test data operations. This function checks both read and write access
+ * to ensure full functionality.
+ *
+ * ## Access Checks
+ *
+ * The function verifies:
+ * - Directory existence
+ * - Read permissions for listing directory contents
+ * - Write permissions for creating and modifying files
+ * - Execute permissions for directory traversal
+ *
+ * ## Platform Compatibility
+ *
+ * The implementation uses platform-specific system calls:
+ * - Unix/Linux: Uses access() system call with R_OK, W_OK, X_OK flags
+ * - Windows: Uses GetFileAttributes() and access control checks
+ * - Cross-platform: Falls back to basic existence checks if needed
+ *
+ * @param path Path to the directory to check
+ * @return true if directory is accessible for read/write operations
+ *
+ * @note The function checks for both read and write permissions
+ * @note Returns false if the directory doesn't exist
+ * @note The function is safe to call multiple times
+ *
+ * @see directory_exists() for basic directory existence checking
+ * @see create_directory_structure_core() for creating missing directories
+ */
+bool check_directory_accessible_core(const char* path) {
+    if (!path) {
+        return false;
+    }
+
+    // Check if directory exists
+    if (!directory_exists(path)) {
+        return false;
+    }
+
+    // Check read/write/execute permissions
+#ifdef _WIN32
+    // Windows implementation
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        return false;
+    }
+    
+    // Check if it's a directory
+    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return false;
+    }
+    
+    // Try to access the directory (basic check)
+    return _access(path, 06) == 0; // Read and write access
+#else
+    // Unix/Linux implementation
+    return access(path, R_OK | W_OK | X_OK) == 0;
+#endif
+}
+
+/**
+ * @brief Create directory structure for test data files.
+ *
+ * Creates the necessary directory structure for test data files, including
+ * parent directories if they don't exist. Sets appropriate permissions
+ * for test data operations.
+ *
+ * ## Directory Creation Process
+ *
+ * The function follows these steps:
+ * 1. **Path Analysis**: Parse the directory path and identify components
+ * 2. **Parent Creation**: Create parent directories recursively if needed
+ * 3. **Directory Creation**: Create the target directory with proper permissions
+ * 4. **Permission Setup**: Set read/write/execute permissions for test operations
+ * 5. **Validation**: Verify the created directory is accessible
+ *
+ * ## Permission Setup
+ *
+ * Created directories have the following permissions:
+ * - **Owner**: Read, write, execute (full access)
+ * - **Group**: Read, execute (access for group members)
+ * - **Others**: Read, execute (public read access)
+ * - **Mode**: 0755 on Unix systems, appropriate ACLs on Windows
+ *
+ * @param path Path to the directory structure to create
+ * @return true if directory structure was created successfully
+ *
+ * @note The function is idempotent - safe to call multiple times
+ * @note Creates parent directories recursively as needed
+ * @note Sets appropriate permissions for test data operations
+ *
+ * @see check_directory_accessible_core() for verifying directory accessibility
+ * @see directory_exists() for checking if directories already exist
+ */
+bool create_directory_structure_core(const char* path) {
+    if (!path) {
+        return false;
+    }
+
+    // If directory already exists and is accessible, return success
+    if (directory_exists(path) && check_directory_accessible_core(path)) {
+        return true;
+    }
+
+    std::string path_str(path);
+    std::string current_path;
+    
+    // Create directories recursively
+    for (size_t i = 0; i < path_str.length(); i++) {
+        if (path_str[i] == '/' || path_str[i] == '\\' || i == path_str.length() - 1) {
+            if (i == path_str.length() - 1) {
+                current_path = path_str;
+            } else {
+                current_path = path_str.substr(0, i);
+            }
+            
+            if (!current_path.empty() && !directory_exists(current_path.c_str())) {
+#ifdef _WIN32
+                if (CreateDirectoryA(current_path.c_str(), NULL) == 0) {
+                    DWORD error = GetLastError();
+                    if (error != ERROR_ALREADY_EXISTS) {
+                        return false;
+                    }
+                }
+#else
+                if (mkdir(current_path.c_str(), 0755) != 0) {
+                    if (errno != EEXIST) {
+                        return false;
+                    }
+                }
+#endif
+            }
+        }
+    }
+
+    // Verify the final directory is accessible
+    return check_directory_accessible_core(path);
 }

@@ -1,4 +1,7 @@
 #include "../unit/test_core_functionality.h"
+#include "common.h"
+#include "llama-dataset.h"
+#include "llama-impl.h"
 
 // TestDataCreator is now available from the shared header
 
@@ -452,7 +455,7 @@ void test_error_recovery() {
     params.in_files.push_back(corrupted_gguf);
     struct llama_dataset* dataset = llama_dataset_from_gguf(&params);
     if (!dataset) {
-        LLAMA_LOG_INFO("  Corrupted GGUF correctly rejected: %s\n", llama_dataset_get_error());
+        LLAMA_LOG_INFO(2"  Corrupted GGUF correctly rejected: %s\n", llama_dataset_get_error());
         llama_dataset_clear_error();
     } else {
         LLAMA_LOG_INFO("  Warning: Corrupted GGUF was loaded (might be valid)\n");
@@ -517,7 +520,7 @@ void test_error_recovery() {
 int main(int argc, char** argv) {
     // Parse command-line arguments for dataset directory paths
     std::vector<std::string> dataset_dirs;
-    
+
     if (argc > 1) {
         for (int i = 1; i < argc; i++) {
             dataset_dirs.push_back(argv[i]);

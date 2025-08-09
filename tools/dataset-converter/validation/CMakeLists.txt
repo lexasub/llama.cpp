@@ -10,6 +10,10 @@ set(VALIDATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-gguf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-parquet.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-orchestration.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-creation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-reporting.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-cpp-wrapper.cpp
 )
 
 # Define validation module header files

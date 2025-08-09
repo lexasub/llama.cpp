@@ -1,3 +1,5 @@
+#include "common.h"
+#include "llama-impl.h"
 #include "test_core_functionality.h"
 
 // Test Parquet factory function with valid and invalid inputs
@@ -23,11 +25,11 @@ void test_parquet_factory() {
     TestDatasetGuard dataset(load_test_dataset(TEST_DATA_PARQUET, DATASET_PARQUET, false));
     if (dataset.is_valid()) {
         TEST_LOG_SUCCESS("Successfully loaded valid Parquet file");
-        
+
         // Test basic properties
         TEST_ASSERT(validate_basic_dataset_properties(dataset.get()), "Basic dataset properties should be valid");
         display_dataset_summary(dataset.get(), "Parquet dataset");
-        
+
         TEST_LOG_SUCCESS("Dataset cleanup successful");
     } else {
         TEST_LOG_INFO("Parquet file not available or support not compiled in: %s", llama_dataset_get_error());

@@ -17,6 +17,7 @@ set(PARQUET_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-parquet-schema.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-parquet-conversion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-parquet-streaming.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-parquet-loader.cpp
 )
 
 # Define Parquet module header files
@@ -41,8 +42,11 @@ target_include_directories(dataset_parquet_format PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
 )
 
-# Link Arrow/Parquet dependencies
+# Link core dependencies and Arrow/Parquet dependencies
 target_link_libraries(dataset_parquet_format PRIVATE
+    dataset_core
+    llama
+    ggml
     Arrow::arrow_shared
     Parquet::parquet_shared
 )

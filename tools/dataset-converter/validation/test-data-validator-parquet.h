@@ -626,6 +626,20 @@ bool create_test_parquet_with_text(const char* path, const char** texts, size_t 
 bool create_test_parquet_mixed_content(const char* path, size_t num_sequences);
 
 /**
+ * @brief Create a Parquet dataset with pre-tokenized sequences.
+ *
+ * Creates a Parquet file containing pre-tokenized sequences represented as
+ * integer arrays. This function is used for testing tokenization validation
+ * and conversion workflows.
+ *
+ * @param path Path where to create the tokenized Parquet file
+ * @param num_sequences Number of tokenized sequences to include
+ * @param avg_sequence_length Average length of tokenized sequences
+ * @return true if the tokenized dataset was created successfully
+ */
+bool create_tokenized_parquet_dataset(const char* path, uint64_t num_sequences, int32_t avg_sequence_length);
+
+/**
  * @brief Validate text-to-token conversion accuracy in a Parquet file.
  *
  * @param path Path to the Parquet file

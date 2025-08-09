@@ -5,6 +5,7 @@
 set(GGUF_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-gguf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-gguf-utils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-gguf-loader.cpp
 )
 
 # Define GGUF module header files
@@ -29,7 +30,7 @@ target_include_directories(dataset_gguf_format PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
 )
 
-# Link core dependencies
+# Link core dependencies and cross-module dependencies
 target_link_libraries(dataset_gguf_format PRIVATE
     llama
     ggml
@@ -44,3 +45,27 @@ set_target_properties(dataset_gguf_format PROPERTIES
 
 # Export variables for parent CMakeLists.txt
 set(GGUF_FORMAT_LIBRARY dataset_gguf_format PARENT_SCOPE)
+
+# Add GGUF loader interface test
+add_executable(test-gguf-loader-interface
+    test_gguf_loader.cpp
+)
+
+target_include_directories(test-gguf-loader-interface PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+)
+
+target_link_libraries(test-gguf-loader-interface PRIVATE
+    dataset_gguf_format
+)
+
+# Set target properties for test
+set_target_properties(test-gguf-loader-interface PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)

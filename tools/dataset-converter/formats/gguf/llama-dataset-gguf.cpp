@@ -130,13 +130,18 @@
 #include "llama-dataset-gguf.h"
 
 #include "common.h"
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-gguf-utils.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-utils.h"
-#include "llama-dataset-validation.h"
+#include "../../validation/llama-dataset-validation.h"
 #include "llama-impl.h"
-#include "streaming-cache.h"
+#include "../../streaming/streaming-cache.h"
+
+// Forward declarations for core functions
+extern "C" struct llama_dataset* llama_dataset_alloc_internal(enum dataset_type type, bool streaming);
+extern "C" void llama_dataset_set_error(const char* message);
+extern "C" void llama_dataset_set_error_with_code(enum dataset_error code, const char* message);
 
 #include <cstdio>
 #include <cstring>
@@ -273,7 +278,7 @@ struct llama_dataset* llama_dataset_load_gguf(const common_params * common_param
     }
 
     // Create dataset structure
-    struct llama_dataset* dataset = llama_dataset_alloc(DATASET_GGUF, common_params->dataset_streaming);
+    struct llama_dataset* dataset = llama_dataset_alloc_internal(DATASET_GGUF, common_params->dataset_streaming);
     if (!dataset) {
         // Error already set by dataset_alloc
         return nullptr;
@@ -331,18 +336,34 @@ struct llama_dataset* llama_dataset_load_gguf(const common_params * common_param
         }
     }
 
-    // Cache tensor pointers for fast access
-    if (!llama_dataset_cache_tensors(dataset)) {
-        // Error already set by dataset_cache_tensors
-        if (dataset->ggml_ctx) {
-            ggml_free(dataset->ggml_ctx);
+    // Set the number of sequences from GGUF context
+    dataset->n_seq = gguf_get_n_tensors(dataset->ctx);
+    
+    // Initialize cached tensors array for fast access
+    if (dataset->n_seq > 0) {
+        dataset->cached_tensors = static_cast<struct ggml_tensor**>(calloc(dataset->n_seq, sizeof(struct ggml_tensor*)));
+        if (!dataset->cached_tensors) {
+            llama_dataset_set_error_with_code(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate cached tensors array");
+            if (dataset->ggml_ctx) {
+                ggml_free(dataset->ggml_ctx);
+            }
+            gguf_free(dataset->ctx);
+            if (dataset->format_data) {
+                free(dataset->format_data);
+            }
+            free(dataset);
+            return nullptr;
         }
-        gguf_free(dataset->ctx);
-        if (dataset->format_data) {
-            free(dataset->format_data);
+        
+        // In non-streaming mode, cache tensor pointers from GGML context
+        if (!common_params->dataset_streaming && dataset->ggml_ctx) {
+            for (uint64_t i = 0; i < dataset->n_seq; i++) {
+                const char* tensor_name = gguf_get_tensor_name(dataset->ctx, i);
+                if (tensor_name) {
+                    dataset->cached_tensors[i] = ggml_get_tensor(dataset->ggml_ctx, tensor_name);
+                }
+            }
         }
-        free(dataset);
-        return nullptr;
     }
 
     return dataset;
@@ -475,6 +496,8 @@ void* llama_dataset_gguf_get_tensor_data_streaming(const struct llama_dataset* d
         return nullptr;
     }
 
+    // DEPRECATED: Direct streaming cache access - use abstraction layer
+    // TODO: Replace with streaming abstraction layer in future refactoring
     // Check streaming cache first
     if (dataset->streaming_cache) {
         llama_dataset_streaming_cache* cache = dataset->streaming_cache;
@@ -543,6 +566,8 @@ void* llama_dataset_gguf_get_tensor_data_streaming(const struct llama_dataset* d
 
     fclose(file);
 
+    // DEPRECATED: Direct streaming cache access - use abstraction layer
+    // TODO: Replace with streaming abstraction layer in future refactoring
     // Add to streaming cache (cache takes ownership of the data)
     if (dataset->streaming_cache) {
         llama_dataset_streaming_cache* cache = dataset->streaming_cache;

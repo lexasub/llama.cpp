@@ -100,6 +100,9 @@
 #include "test-data-validator-gguf.h"
 #include "test-data-validator-parquet.h"
 #include "test-data-validator-text.h"
+#include "test-data-validator-orchestration.h"
+#include "test-data-validator-creation.h"
+#include "test-data-validator-reporting.h"
 
 #ifdef __cplusplus
 extern "C" {

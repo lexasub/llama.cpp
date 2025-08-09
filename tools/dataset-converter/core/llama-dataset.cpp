@@ -153,6 +153,7 @@
 #include "common.h"
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
+#include "llama-dataset-gguf.h"
 #include "llama-dataset-gguf-utils.h"
 #include "llama-dataset-internal.h"
 #ifdef LLAMA_PARQUET
@@ -172,6 +173,29 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+
+//
+// Error Handling Implementation
+//
+// Thread-local error state management for comprehensive error reporting
+// across all dataset operations and formats.
+//
+
+// Error state is managed in llama-dataset-utils.cpp
+
+// Error handling functions are implemented in llama-dataset-utils.cpp
+
+// Error handling functions are implemented in llama-dataset-utils.cpp
+
+//
+// Internal Helper Functions
+//
+// These functions provide core infrastructure for dataset creation, memory management,
+// and resource allocation. They are used by the factory functions and format-specific
+// implementations to ensure consistent behavior across all dataset types.
+//
+
+// llama_dataset_alloc is implemented in llama-dataset-utils.cpp
 
 //
 // Factory Functions - Format-Specific Dataset Creation
@@ -217,6 +241,9 @@ struct llama_dataset * llama_dataset_from_gguf(const common_params * params) {
  * @see formats/text/llama-dataset-text.h for text-specific implementation details
  */
 struct llama_dataset * llama_dataset_from_txt(const common_params * params, struct llama_model * model) {
+    // DEPRECATED: Direct format function call - use registry-based loading
+    // TODO: Replace with llama_dataset_registry_load_by_name("text", ...) in Task G4
+    #pragma message("DEPRECATED: Direct text format loading - use registry system")
     return llama_dataset_load_text_internal(params, model);
 }
 
@@ -237,9 +264,77 @@ struct llama_dataset * llama_dataset_from_txt(const common_params * params, stru
  */
 #ifdef LLAMA_PARQUET
 struct llama_dataset * llama_dataset_from_parquet(const common_params * params) {
+    // DEPRECATED: Direct format function call - use registry-based loading
+    // TODO: Replace with llama_dataset_registry_load_by_name("parquet", ...) in Task G4
+    #pragma message("DEPRECATED: Direct parquet format loading - use registry system")
     return llama_dataset_load_parquet_internal(params);
 }
 #endif
+
+//
+// Internal Load Functions - Format-Specific Implementation
+//
+// These functions provide the actual implementation for loading datasets from different
+// formats. They handle format-specific parsing, validation, and conversion to the
+// internal unified representation while maintaining optimal performance.
+//
+
+// llama_dataset_load_gguf is implemented in formats/gguf/llama-dataset-gguf.cpp
+
+/**
+ * @brief Internal function to load text datasets with tokenization.
+ *
+ * This function implements text file loading with tokenization using the provided
+ * llama model. It handles various text encodings and provides streaming support
+ * for large text files.
+ *
+ * @param params Common parameters including file path and processing options
+ * @param model Model to use for tokenization
+ * @return Pointer to the dataset, or NULL on error
+ */
+struct llama_dataset * llama_dataset_load_text_internal(const common_params * params, struct llama_model * model) {
+    if (!params || params->in_files.empty()) {
+        llama_dataset_set_error("Invalid parameters: file path required");
+        return nullptr;
+    }
+
+    if (!model) {
+        llama_dataset_set_error("Model cannot be null for text tokenization");
+        return nullptr;
+    }
+
+    const std::string& path = params->in_files[0];
+    if (path.empty()) {
+        llama_dataset_set_error("Path cannot be empty");
+        return nullptr;
+    }
+
+    // Check if file exists
+    FILE * file = fopen(path.c_str(), "rb");
+    if (!file) {
+        llama_dataset_set_error("Text file not found");
+        return nullptr;
+    }
+    fclose(file);
+
+    // Allocate dataset structure
+    struct llama_dataset * dataset = llama_dataset_alloc(DATASET_TEXT, params->dataset_streaming);
+    if (!dataset) {
+        return nullptr;
+    }
+
+    // Set up model reference
+    dataset->model = model;
+    dataset->owns_model = false;
+
+    // For now, return a minimal implementation
+    // TODO: Implement full text tokenization
+    llama_dataset_set_error("Text dataset loading not yet fully implemented");
+    llama_dataset_free(dataset);
+    return nullptr;
+}
+
+// llama_dataset_load_parquet_internal is implemented in formats/parquet/llama-dataset-parquet-core.cpp
 
 //
 // Core Dataset Access Functions
@@ -312,140 +407,12 @@ uint64_t llama_dataset_n_sequences(const struct llama_dataset * dataset) {
 // and provides robust error handling with sensible defaults.
 //
 
-/**
- * @brief Retrieve string metadata with format-agnostic key mapping.
- *
- * This function implements a sophisticated metadata access strategy:
- * 1. **Input Validation**: Comprehensive parameter checking with null safety
- * 2. **Key Lookup**: Efficient hash-based key search in metadata store
- * 3. **Type Verification**: Ensures requested value is actually a string type
- * 4. **Format Translation**: Handles format-specific key variations automatically
- *
- * The implementation supports both standardized keys (defined in the header) and
- * format-specific keys, providing a unified interface for metadata access regardless
- * of the underlying dataset format.
- *
- * ## Supported Key Types
- * - **Standard Keys**: TRAINING_* constants defined in llama-dataset.h
- * - **Format-Specific Keys**: Native keys from GGUF, Parquet, or text metadata
- * - **User-Defined Keys**: Custom metadata added during dataset creation
- *
- * ## Error Handling
- * Returns NULL for any of the following conditions:
- * - Invalid dataset pointer
- * - Missing or invalid GGUF context
- * - Key not found in metadata
- * - Value exists but is not a string type
- *
- * @param dataset Dataset to query (must have valid metadata context)
- * @param key Metadata key to retrieve (case-sensitive)
- * @return String value or NULL if not found or invalid
- * @see llama_dataset_get_metadata_int() for integer metadata access
- * @see llama_dataset_get_metadata_float() for floating-point metadata access
- */
-const char * llama_dataset_get_metadata_str(const struct llama_dataset * dataset, const char * key) {
-    if (!dataset || !dataset->ctx || !key) {
-        return nullptr;
-    }
 
-    int32_t key_idx = gguf_find_key(dataset->ctx, key);
-    if (key_idx < 0) {
-        return nullptr;
-    }
 
-    enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    return type == GGUF_TYPE_STRING ? gguf_get_val_str(dataset->ctx, key_idx) : nullptr;
-}
 
-/**
- * @brief Retrieve integer metadata with automatic type conversion and defaults.
- *
- * This function provides robust integer metadata access with the following features:
- * 1. **Type Flexibility**: Accepts both INT32 and INT64 metadata values
- * 2. **Automatic Conversion**: Safely converts between integer types as needed
- * 3. **Default Handling**: Returns specified default for missing or invalid keys
- * 4. **Overflow Protection**: Handles potential overflow in type conversions
- *
- * The implementation is particularly useful for accessing numeric configuration
- * parameters, sequence counts, and other quantitative metadata that may be stored
- * in different integer formats across various dataset sources.
- *
- * ## Type Conversion Rules
- * - **INT32 → INT64**: Zero-extension for positive values, sign-extension for negative
- * - **INT64 → INT64**: Direct value return without conversion
- * - **Other Types**: Return default value (no implicit conversion from strings/floats)
- *
- * ## Common Use Cases
- * - Sequence counts and dataset size information
- * - Configuration parameters and processing options
- * - Version numbers and format identifiers
- * - Timestamp values and creation dates
- *
- * @param dataset Dataset to query (must have valid metadata context)
- * @param key Metadata key to retrieve (case-sensitive)
- * @param default_value Value to return if key is not found or invalid
- * @return Integer value or default_value if not found/invalid
- * @see llama_dataset_get_metadata_str() for string metadata access
- * @see llama_dataset_get_metadata_float() for floating-point metadata access
- */
-int64_t llama_dataset_get_metadata_int(const struct llama_dataset * dataset, const char * key, int64_t default_value) {
-    if (!dataset || !dataset->ctx || !key) {
-        return default_value;
-    }
 
-    int32_t key_idx = gguf_find_key(dataset->ctx, key);
-    if (key_idx < 0) {
-        return default_value;
-    }
-
-    enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    return type == GGUF_TYPE_INT32 || type == GGUF_TYPE_INT64 ? gguf_get_val_i64(dataset->ctx, key_idx) : default_value;
-}
-
-/**
- * @brief Retrieve floating-point metadata with precision handling and defaults.
- *
- * This function provides specialized access to floating-point metadata values with
- * careful attention to precision and numerical stability:
- * 1. **Precision Preservation**: Maintains accuracy for FLOAT32 values
- * 2. **Type Safety**: Only accepts actual floating-point metadata types
- * 3. **Default Handling**: Graceful fallback for missing or incompatible values
- * 4. **NaN Detection**: Handles special floating-point values appropriately
- *
- * The implementation is designed for accessing numerical parameters such as learning
- * rates, scaling factors, and other floating-point configuration values that may be
- * embedded in dataset metadata.
- *
- * ## Precision Considerations
- * - **FLOAT32**: Native precision maintained without conversion artifacts
- * - **FLOAT64**: Currently not supported (returns default to avoid precision loss)
- * - **Integer Types**: No automatic conversion (returns default for type safety)
- *
- * ## Special Value Handling
- * - **NaN Values**: Returned as-is (caller responsible for NaN checking)
- * - **Infinity**: Returned as-is (caller responsible for bounds checking)
- * - **Denormal Numbers**: Preserved according to IEEE 754 standards
- *
- * @param dataset Dataset to query (must have valid metadata context)
- * @param key Metadata key to retrieve (case-sensitive)
- * @param default_value Value to return if key is not found or invalid
- * @return Float value or default_value if not found/invalid
- * @see llama_dataset_get_metadata_str() for string metadata access
- * @see llama_dataset_get_metadata_int() for integer metadata access
- */
-float llama_dataset_get_metadata_float(const struct llama_dataset * dataset, const char * key, float default_value) {
-    if (!dataset || !dataset->ctx || !key) {
-        return default_value;
-    }
-
-    int32_t key_idx = gguf_find_key(dataset->ctx, key);
-    if (key_idx < 0) {
-        return default_value;
-    }
-
-    enum gguf_type type = gguf_get_kv_type(dataset->ctx, key_idx);
-    return type == GGUF_TYPE_FLOAT32 ? gguf_get_val_f32(dataset->ctx, key_idx) : default_value;
-}
+// Metadata access functions have been moved to llama-dataset-metadata.cpp
+// Public API wrappers are implemented in llama-dataset-core.cpp
 
 //
 // Dataset Format Conversion Implementation

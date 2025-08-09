@@ -1,3 +1,6 @@
+#include "common.h"
+#include "llama-dataset.h"
+#include "llama-impl.h"
 #include "test_core_functionality.h"
 
 // Test text factory function with valid and invalid inputs
@@ -42,7 +45,7 @@ void test_sequence_access_validation() {
 
     // Try to load a GGUF dataset, but handle failure gracefully
     TestDatasetGuard dataset(load_test_dataset(TEST_DATA_SMALL_GGUF, DATASET_GGUF, false));
-    
+
     if (!dataset.get()) {
         TEST_LOG_WARNING("GGUF dataset could not be loaded, skipping sequence access tests");
         TEST_LOG_INFO("This may indicate test data needs to be regenerated");
@@ -79,7 +82,7 @@ void test_error_conditions() {
     bool corrupted_gguf_handled = test_error_handling("corrupted GGUF file", []() {
         return load_test_dataset(TEST_DATA_CORRUPTED_GGUF, DATASET_GGUF, false);
     });
-    
+
     if (corrupted_gguf_handled) {
         TEST_LOG_SUCCESS("Corrupted GGUF file correctly rejected");
     } else {
@@ -91,7 +94,7 @@ void test_error_conditions() {
     bool corrupted_parquet_handled = test_error_handling("corrupted Parquet file", []() {
         return load_test_dataset(TEST_DATA_CORRUPTED_PARQUET, DATASET_PARQUET, false);
     });
-    
+
     if (corrupted_parquet_handled) {
         TEST_LOG_SUCCESS("Corrupted Parquet file correctly rejected");
     } else {

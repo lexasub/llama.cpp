@@ -194,12 +194,13 @@
 #include <string>
 #include <vector>
 
-#include "ggml/include/ggml.h"
-#include "ggml/include/gguf.h"
-#include "include/llama.h"
+#include "ggml.h"
+#include "gguf.h"
+#include "llama.h"
 #include "common.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-utils.h"
+#include "llama-dataset-modules.h"
 #include "llama-impl.h"
 
 /**
@@ -419,7 +420,8 @@ struct llama_dataset * llama_dataset_load_text_internal(const common_params * pa
     }
 
     // Create dataset structure
-    struct llama_dataset * dataset = llama_dataset_alloc(DATASET_TEXT, false);
+    extern struct llama_dataset* llama_dataset_alloc_internal(enum dataset_type type, bool streaming);
+    struct llama_dataset * dataset = llama_dataset_alloc_internal(DATASET_TEXT, false);
     if (!dataset) {
         return nullptr; // Error already set by dataset_alloc
     }
