@@ -103,7 +103,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "llama-dataset-parquet.h"
-#include "core/llama-dataset-internal.h"
+#include "../../core/llama-dataset-internal.h"
 
 #ifdef __cplusplus
 #include <memory>

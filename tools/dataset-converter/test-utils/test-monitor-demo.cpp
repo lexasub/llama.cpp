@@ -250,7 +250,7 @@
 #include <iostream>
 #include <vector>
 
-#include "src/llama-impl.h"
+#include "llama-impl.h"
 #include "test-execution-monitor.h"
 
 using namespace llama_dataset;

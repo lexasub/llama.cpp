@@ -32,15 +32,22 @@ add_library(dataset_parquet_format STATIC ${PARQUET_SOURCES} ${PARQUET_HEADERS})
 # Set C++ standard
 target_compile_features(dataset_parquet_format PRIVATE cxx_std_17)
 
-# Include directories for Parquet modules
-target_include_directories(dataset_parquet_format PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
-)
+# Include directories for Parquet modules using standardized paths
+if(DEFINED DATASET_CONVERTER_INCLUDE_DIRS)
+    target_include_directories(dataset_parquet_format PRIVATE ${DATASET_CONVERTER_INCLUDE_DIRS})
+else()
+    # Fallback to manual include directories if parent hasn't defined them
+    target_include_directories(dataset_parquet_format PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../streaming
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../validation
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+    )
+endif()
 
 # Link core dependencies and Arrow/Parquet dependencies
 target_link_libraries(dataset_parquet_format PRIVATE

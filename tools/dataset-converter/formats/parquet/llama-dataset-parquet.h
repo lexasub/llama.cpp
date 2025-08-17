@@ -1,6 +1,6 @@
 #pragma once
 #ifdef LLAMA_PARQUET
-#include "core/llama-dataset.h"
+#include "../../core/llama-dataset.h"
 
 #ifdef __cplusplus
 #include <vector>

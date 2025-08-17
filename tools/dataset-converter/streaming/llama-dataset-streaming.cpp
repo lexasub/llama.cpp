@@ -112,7 +112,7 @@
  * double hit_ratio;
  * size_t memory_usage, entry_count;
  * llama_dataset_get_streaming_stats(dataset, &hit_ratio, &memory_usage, &entry_count);
- * printf("Cache hit ratio: %.2f%%, Memory: %zu bytes, Entries: %zu\n", 
+ * printf("Cache hit ratio: %.2f%%, Memory: %zu bytes, Entries: %zu\n",
  *        hit_ratio * 100, memory_usage, entry_count);
  * ```
  *
@@ -191,11 +191,12 @@ static llama_dataset_stream_optimization_manager* llama_dataset_streaming_get_op
         return nullptr;
     }
 
-    // Check if we already have an optimization manager
-    llama_dataset_stream_optimization_manager* manager = static_cast<llama_dataset_stream_optimization_manager*>(dataset->optimization_manager);
+    // Note: optimization_manager member removed in Task H1 - using registry-based approach
+    // For now, create a new manager each time (registry-based approach planned)
+    llama_dataset_stream_optimization_manager* manager = nullptr;
 
-    // If not, create one and initialize it
-    if (!manager) {
+    // Create one and initialize it
+    if (true) {  // Always create for now until registry is implemented
         // Create a name for the manager based on the dataset type
         std::string name;
         switch (dataset->type) {
@@ -262,8 +263,7 @@ static llama_dataset_stream_optimization_manager* llama_dataset_streaming_get_op
         // Start the optimization manager
         manager->start();
 
-        // Store the manager in the dataset
-        dataset->optimization_manager = manager;
+        // Note: optimization_manager member removed in Task H1 - using registry-based approach
     }
 
     return manager;
@@ -396,7 +396,7 @@ bool llama_dataset_set_streaming_cache_size_internal(struct llama_dataset* datas
  *
  * ### Window Size Selection
  * - **Small datasets** (< 1GB): window_size = 3-5 sequences
- * - **Medium datasets** (1-10GB): window_size = 5-10 sequences  
+ * - **Medium datasets** (1-10GB): window_size = 5-10 sequences
  * - **Large datasets** (> 10GB): window_size = 10-20 sequences
  * - **Available memory**: Ensure window_size * avg_sequence_size < cache_size / 2
  *
@@ -702,8 +702,7 @@ bool llama_dataset_streaming_initialize_internal(struct llama_dataset* dataset, 
         return false;
     }
 
-    // Initialize optimization manager to nullptr - it will be created on-demand
-    dataset->optimization_manager = nullptr;
+    // Note: optimization_manager member removed in Task H1 - using registry-based approach
 
     return true;
 }
@@ -721,14 +720,8 @@ void llama_dataset_streaming_cleanup_internal(struct llama_dataset* dataset) {
         return;
     }
 
-    // Cleanup optimization manager
-    if (dataset->optimization_manager) {
-        llama_dataset_stream_optimization_manager* manager = 
-            static_cast<llama_dataset_stream_optimization_manager*>(dataset->optimization_manager);
-        manager->stop();
-        delete manager;
-        dataset->optimization_manager = nullptr;
-    }
+    // Note: optimization_manager member removed in Task H1 - using registry-based approach
+    // Note: Proper cleanup through registry not yet implemented
 
     // Cleanup streaming cache
     if (dataset->streaming_cache) {
@@ -784,34 +777,6 @@ void llama_dataset_streaming_cleanup_internal(struct llama_dataset* dataset) {
  * @see llama_dataset_set_adaptive_cache_sizing() for automatic optimization
  * @see streaming/streaming-cache.h for detailed cache implementation
  */
-bool llama_dataset_streaming_get_stats_internal(const struct llama_dataset* dataset, double* hit_ratio, size_t* memory_usage_bytes, size_t* entry_count) {
-    if (!dataset || !dataset->streaming) {
-        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
-        return false;
-    }
 
-    if (!dataset->streaming_cache) {
-        llama_dataset_error_set_with_code_internal(DATASET_ERROR_CONTEXT_CREATION_FAILED, "Streaming cache not initialized");
-        return false;
-    }
-
-    // Get statistics from the streaming cache
-    llama_dataset_streaming_cache* cache = static_cast<llama_dataset_streaming_cache*>(dataset->streaming_cache);
-    auto stats = cache->get_stats();
-
-    // Populate output parameters
-    if (hit_ratio) {
-        *hit_ratio = stats.hit_ratio;
-    }
-    
-    if (memory_usage_bytes) {
-        *memory_usage_bytes = stats.current_memory;
-    }
-    
-    if (entry_count) {
-        *entry_count = stats.entry_count;
-    }
-
-    return true;
-}}
+}
  // extern "C"

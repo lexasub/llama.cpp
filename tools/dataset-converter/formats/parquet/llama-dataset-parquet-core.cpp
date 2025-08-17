@@ -93,8 +93,8 @@
 #include "common/common.h"
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
-#include "llama-dataset-internal.h"
-#include "llama-dataset-utils.h"
+#include "../../core/llama-dataset-internal.h"
+#include "../../core/llama-dataset-utils.h"
 #include "llama.h"
 #include "llama-impl.h"
 
@@ -1236,9 +1236,3 @@ size_t estimate_tensor_cache_memory_usage(const struct ggml_tensor * tensor) {
 }
 
 #endif // LLAMA_PARQUET
-// Implementation of Parquet loader function for core module
-extern "C" struct llama_dataset* llama_dataset_load_parquet_internal(const struct common_params* params) {
-    // TODO: Implement Parquet loading
-    (void)params;
-    return nullptr; // Placeholder
-}

@@ -2,7 +2,7 @@
 #include "test-data-validator-common.h"
 #include "test-data-validator-core.h"
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 
@@ -165,8 +165,8 @@ enum test_data_validation_result validate_tokenized_parquet_file(const char* pat
         return basic_result;
     }
 
-    // TODO: Add specific tokenization validation logic
-    // This would involve checking:
+    // Note: Specific tokenization validation logic not implemented
+    // Would involve checking:
     // 1. Presence of token columns with correct data types
     // 2. Token value ranges (should be valid token IDs)
     // 3. Sequence length consistency
@@ -285,8 +285,8 @@ enum test_data_validation_result validate_text_to_token_conversion(const char* p
         return basic_result;
     }
 
-    // TODO: Implement actual tokenization validation
-    // This would involve:
+    // Note: Actual tokenization validation not implemented
+    // Would involve:
     // 1. Loading the llama model
     // 2. Reading text data from Parquet file
     // 3. Tokenizing the text using the model

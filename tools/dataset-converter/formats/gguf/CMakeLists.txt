@@ -20,20 +20,28 @@ add_library(dataset_gguf_format STATIC ${GGUF_SOURCES} ${GGUF_HEADERS})
 # Set C++ standard
 target_compile_features(dataset_gguf_format PRIVATE cxx_std_17)
 
-# Include directories for GGUF modules
-target_include_directories(dataset_gguf_format PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
-)
+# Include directories for GGUF modules using standardized paths
+if(DEFINED DATASET_CONVERTER_INCLUDE_DIRS)
+    target_include_directories(dataset_gguf_format PRIVATE ${DATASET_CONVERTER_INCLUDE_DIRS})
+else()
+    # Fallback to manual include directories if parent hasn't defined them
+    target_include_directories(dataset_gguf_format PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../streaming
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../validation
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+    )
+endif()
 
 # Link core dependencies and cross-module dependencies
-target_link_libraries(dataset_gguf_format PRIVATE
+target_link_libraries(dataset_gguf_format PUBLIC
     llama
     ggml
+    dataset_streaming
 )
 
 # Set target properties
@@ -51,14 +59,20 @@ add_executable(test-gguf-loader-interface
     test_gguf_loader.cpp
 )
 
-target_include_directories(test-gguf-loader-interface PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
-)
+# Apply standardized include directories for test
+if(DEFINED DATASET_CONVERTER_INCLUDE_DIRS)
+    target_include_directories(test-gguf-loader-interface PRIVATE ${DATASET_CONVERTER_INCLUDE_DIRS})
+else()
+    # Fallback to manual include directories
+    target_include_directories(test-gguf-loader-interface PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../ggml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include
+    )
+endif()
 
 target_link_libraries(test-gguf-loader-interface PRIVATE
     dataset_gguf_format

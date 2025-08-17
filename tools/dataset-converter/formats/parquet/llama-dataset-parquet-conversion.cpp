@@ -77,8 +77,8 @@
 #include "common/common.h"
 #include "ggml/include/ggml.h"
 #include "ggml/include/gguf.h"
-#include "llama-dataset-internal.h"
-#include "llama-dataset-utils.h"
+#include "../../core/llama-dataset-internal.h"
+#include "../../core/llama-dataset-utils.h"
 #include "llama.h"
 #include "llama-impl.h"
 static void handle_tokenization_error(

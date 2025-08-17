@@ -725,12 +725,33 @@ The following CMake targets replace the original shell scripts:
 
 **This tool does not currently support the `safetensors` format.** The focus is on providing a robust pipeline for formats commonly used in large-scale data processing. Future support for `safetensors` may be considered based on community demand.
 
-## 14. Development Notes
+## 14. Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+### 📚 Core Documentation
+- **[docs/README.md](docs/README.md)** - Documentation overview and navigation guide
+- **[docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)** - Quick reference for common tasks
+- **[docs/COMPREHENSIVE_USAGE_GUIDE.md](docs/COMPREHENSIVE_USAGE_GUIDE.md)** - Detailed usage examples and best practices
+- **[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)** - Complete API reference
+- **[docs/STREAMING_GUIDE.md](docs/STREAMING_GUIDE.md)** - Streaming functionality and optimization
+- **[docs/ARCHITECTURE_DOCUMENTATION.md](docs/ARCHITECTURE_DOCUMENTATION.md)** - System architecture and design
+- **[docs/IMPLEMENTATION_AND_MIGRATION_GUIDE.md](docs/IMPLEMENTATION_AND_MIGRATION_GUIDE.md)** - Implementation guidance and migration procedures
+- **[docs/BUILD_SYSTEM_INTEGRATION.md](docs/BUILD_SYSTEM_INTEGRATION.md)** - Build system configuration
+- **[docs/COMPREHENSIVE_TESTING_AND_TROUBLESHOOTING_GUIDE.md](docs/COMPREHENSIVE_TESTING_AND_TROUBLESHOOTING_GUIDE.md)** - Testing and troubleshooting
+
+### 🚀 Getting Started
+1. **New Users**: Start with [docs/COMPREHENSIVE_USAGE_GUIDE.md](docs/COMPREHENSIVE_USAGE_GUIDE.md)
+2. **Quick Help**: See [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)
+3. **API Integration**: Reference [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)
+4. **Performance Optimization**: See [docs/STREAMING_GUIDE.md](docs/STREAMING_GUIDE.md)
+
+## 15. Development Notes
 
 For developers working on this codebase:
-- See `docs/REMOVED_FILES.md` for information about the previous implementation.
 - The new interface is designed to be simpler and more consistent while maintaining backward compatibility.
 - Streaming optimization features significantly improve performance for large datasets.
+- Complete architecture documentation is available in [docs/ARCHITECTURE_DOCUMENTATION.md](docs/ARCHITECTURE_DOCUMENTATION.md).
 
 Metadata:
 ```

@@ -4,7 +4,7 @@
 # Define validation module source files
 set(VALIDATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/llama-dataset-validation.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator.cpp
+
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-gguf.cpp
@@ -14,6 +14,7 @@ set(VALIDATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-creation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-reporting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test-data-validator-cpp-wrapper.cpp
+
 )
 
 # Define validation module header files
@@ -33,15 +34,20 @@ add_library(dataset_validation STATIC ${VALIDATION_SOURCES} ${VALIDATION_HEADERS
 # Set C++ standard
 target_compile_features(dataset_validation PRIVATE cxx_std_17)
 
-# Include directories for validation modules
-target_include_directories(dataset_validation PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../common
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../ggml/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
-)
+# Include directories for validation modules using standardized paths
+if(DEFINED DATASET_CONVERTER_INCLUDE_DIRS)
+    target_include_directories(dataset_validation PRIVATE ${DATASET_CONVERTER_INCLUDE_DIRS})
+else()
+    # Fallback to manual include directories if parent hasn't defined them
+    target_include_directories(dataset_validation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../common
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../ggml/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
+    )
+endif()
 
 # Link core dependencies
 target_link_libraries(dataset_validation PRIVATE

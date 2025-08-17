@@ -114,7 +114,7 @@
 #include <string>
 #include <vector>
 
-#include "src/llama-impl.h"
+#include "llama-impl.h"
 
 /**
  * @struct TestResult

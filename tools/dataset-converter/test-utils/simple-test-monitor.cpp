@@ -511,32 +511,32 @@ public:
      * @see execute_test()
      */
     void print_result(const SimpleTestResult& result) {
-        LLAMA_LOG_INFO("Test: %s\n", result.test_name);
-        LLAMA_LOG_INFO("  Status: %s\n", result.passed ? "PASSED" : "FAILED");
-        LLAMA_LOG_INFO("  Exit code: %s\n", result.exit_code);
-        LLAMA_LOG_INFO("  Execution time: ms%s\n\n", result.execution_time_ms);
+        printf("Test: %s\n", result.test_name);
+        printf("  Status: %s\n", result.passed ? "PASSED" : "FAILED");
+        printf("  Exit code: %s\n", result.exit_code);
+        printf("  Execution time: ms%s\n\n", result.execution_time_ms);
 
         if (result.crashed) {
-            LLAMA_LOG_INFO("  CRASHED: %s\n", result.error_message);
+            printf("  CRASHED: %s\n", result.error_message);
         }
 
         if (result.timeout_occurred) {
-            LLAMA_LOG_INFO("  TIMEOUT: Test exceeded %s seconds \n\n", timeout_seconds_);
+            printf("  TIMEOUT: Test exceeded %s seconds \n\n", timeout_seconds_);
         }
 
         if (!result.error_message.empty() && !result.crashed) {
-            LLAMA_LOG_INFO("  Error: %s\n", result.error_message);
+            printf("  Error: %s\n", result.error_message);
         }
 
         if (!result.stdout_output.empty()) {
-            LLAMA_LOG_INFO("  Stdout: %s\n", result.stdout_output);
+            printf("  Stdout: %s\n", result.stdout_output);
         }
 
         if (!result.stderr_output.empty()) {
-            LLAMA_LOG_INFO("  Stderr: %s\n", result.stderr_output);
+            printf("  Stderr: %s\n", result.stderr_output);
         }
 
-        LLAMA_LOG_INFO("\n");
+        printf("\n");
     }
 
 private:
@@ -666,12 +666,12 @@ private:
  * @see SimpleTestResult
  */
 int main(int argc, char* argv[]) {
-    LLAMA_LOG_INFO("Simple Dataset Test Monitor\n");
-    LLAMA_LOG_INFO("===========================\n\n");
+    printf("Simple Dataset Test Monitor\n");
+    printf("===========================\n\n");
 
     if (argc < 2) {
-        LLAMA_LOG_INFO("Usage: %s <test_executable> [test_executable2] ...\n", argv[0]);
-        LLAMA_LOG_INFO("Example: %s ./test-scenarios success\n", argv[0]);
+        printf("Usage: %s <test_executable> [test_executable2] ...\n", argv[0]);
+        printf("Example: %s ./test-scenarios success\n", argv[0]);
         return 1;
     }
 
@@ -681,7 +681,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; i++) {
         std::string test_executable = argv[i];
-        LLAMA_LOG_INFO("Running: %s\n", test_executable);
+        printf("Running: %s\n", test_executable);
 
         auto result = monitor.execute_test(test_executable);
         results.push_back(result);
@@ -695,12 +695,12 @@ int main(int argc, char* argv[]) {
         else failed++;
     }
 
-    LLAMA_LOG_INFO("Summary:\n");
-    LLAMA_LOG_INFO("========\n");
-    LLAMA_LOG_INFO("Total tests: %s\n", results.size());
-    LLAMA_LOG_INFO("Passed: %s\n", passed);
-    LLAMA_LOG_INFO("Failed: %s\n", failed);
-    LLAMA_LOG_INFO("Success rate: %s %%\n", results.empty() ? 0 : passed * 100 / results.size());
+    printf("Summary:\n");
+    printf("========\n");
+    printf("Total tests: %s\n", results.size());
+    printf("Passed: %s\n", passed);
+    printf("Failed: %s\n", failed);
+    printf("Success rate: %s %%\n", results.empty() ? 0 : passed * 100 / results.size());
 
     return failed > 0 ? 1 : 0;
 }

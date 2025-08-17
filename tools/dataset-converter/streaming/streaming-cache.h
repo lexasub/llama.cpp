@@ -22,8 +22,10 @@
 #include <shared_mutex>
 #include <cstring>
 #include "../platform/platform-compat.h"
-#include "log.h"
-#include "llama.h"
+// #include "log.h"  // Using standard logging instead
+// Forward declarations instead of including llama.h
+struct llama_model;
+struct llama_context;
 
 class llama_dataset_streaming_cache {
 public:

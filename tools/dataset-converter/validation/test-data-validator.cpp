@@ -23,7 +23,7 @@
 #include "test-data-validator-parquet.h"
 #include "test-data-validator-text.h"
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 
@@ -61,7 +61,12 @@ extern "C" {
 // - test-data-validator-reporting.cpp: Report generation and output
 // - test-data-validator-cpp-wrapper.cpp: C++ wrapper implementation
 
-// This file now serves as the main entry point and includes the modular implementationsto& spec : file_specs_) {
+// This file now serves as the main entry point and includes the modular implementations
+
+std::vector<std::string> TestDataValidator::GetMissingFiles() {
+    std::vector<std::string> missing;
+    
+    for (const auto& spec : file_specs_) {
         if (!file_exists(spec.path)) {
             missing.push_back(spec.path);
         }
@@ -162,8 +167,8 @@ TestDataValidator::TokenizationStats TestDataValidator::GetTokenizationStats(con
         return stats;
     }
 
-    // TODO: Implement actual statistics gathering
-    // This would involve:
+    // Note: Actual statistics gathering not implemented
+    // Would involve:
     // 1. Opening the Parquet file
     // 2. Analyzing the schema to identify text vs token columns
     // 3. Counting sequences and tokens
@@ -181,4 +186,4 @@ TestDataValidator::TokenizationStats TestDataValidator::GetTokenizationStats(con
     return stats;
 }
 
-#endif // __cplusplus
+// End of C++ implementation

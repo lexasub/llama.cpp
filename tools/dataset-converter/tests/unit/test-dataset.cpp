@@ -4,7 +4,6 @@
 #include <fstream>
 
 #include "common.h"
-#include "llama-dataset-text.h"
 #include "llama-dataset.h"
 
 // Simple test for the dataset interface

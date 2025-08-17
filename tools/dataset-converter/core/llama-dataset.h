@@ -148,7 +148,7 @@ struct llama_dataset;
 #define TRAINING_DATASET_NAME      "training.dataset.name"        // string (optional) - Dataset name (e.g. "OpenWebText-ru").
 #define TRAINING_DATASET_DESCRIPTION "training.dataset.description" // string (optional) - Dataset description (e.g. "OpenWebText-ru").
 #define TRAINING_SEQUENCE_COUNT    "training.sequence.count"      // Number of sequences in the dataset
-#define TRAINING_MAX_LENGTH        "dataset.max_length"           // Maximum sequence length //TODO check
+#define TRAINING_MAX_LENGTH        "dataset.max_length"           // Maximum sequence length (verify key name)
 #define TRAINING_TOKENIZER         "training.tokenizer.gguf.model"// Tokenizer model name (llama, gpt2, etc.).
 #define TRAINING_CREATION_TIME     "training.file.creation_date"  // string (ISO 8601) - File creation date.
 

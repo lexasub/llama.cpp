@@ -198,9 +198,9 @@
 #include "gguf.h"
 #include "llama.h"
 #include "common.h"
-#include "llama-dataset-internal.h"
-#include "llama-dataset-utils.h"
-#include "llama-dataset-modules.h"
+#include "../../core/llama-dataset-internal.h"
+#include "../../core/llama-dataset-utils.h"
+#include "../../core/llama-dataset-modules.h"
 #include "llama-impl.h"
 
 /**

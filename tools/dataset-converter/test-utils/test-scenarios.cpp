@@ -217,7 +217,7 @@
 #include <thread>
 #include <vector>
 
-#include "src/llama-impl.h"
+#include "llama-impl.h"
 
 /**
  * @brief Main entry point for test scenario execution

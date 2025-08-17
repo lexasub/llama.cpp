@@ -163,8 +163,6 @@
 // Include dataset headers
 #include "common.h"
 #include "llama-dataset-internal.h"
-#include "llama-dataset-gguf.h"
-#include "llama-dataset-text.h"
 #include "llama-dataset.h"
 
 /**

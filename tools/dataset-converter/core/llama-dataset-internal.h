@@ -142,6 +142,8 @@
 #endif
 
 // Forward declarations for Windows compatibility
+struct IFormatLoader;
+
 #ifdef __cplusplus
 class llama_dataset_streaming_cache;
 extern "C" {
@@ -207,6 +209,7 @@ struct llama_dataset {
     enum dataset_type type;                 ///< Original format type (GGUF, text, Parquet)
     bool streaming;                         ///< Streaming mode flag (affects memory management strategy)
     void * format_data;                     ///< Format-specific state and configuration (opaque pointer)
+    const struct IFormatLoader * format_loader; ///< Format loader interface for cleanup and operations
 
     // Tokenization Infrastructure
     // Used for text format and any format requiring tokenization services
@@ -218,11 +221,11 @@ struct llama_dataset {
     // C++ components for advanced streaming and optimization capabilities
 #ifdef __cplusplus
     llama_dataset_streaming_cache * streaming_cache;       ///< LRU cache with adaptive sizing (NULL if streaming disabled)
-    void * optimization_manager;            ///< Streaming optimization manager (handles adaptive algorithms)
+    // Optimization manager removed - using registry-based approach (Task H1)
     std::string column;                     ///< Active column name for Parquet datasets (empty for other formats)
 #else
     void * streaming_cache;                 ///< Opaque pointer for C compatibility (cast to streaming_cache in C++)
-    void * optimization_manager;            ///< Opaque pointer for optimization manager (cast in C++)
+    // Optimization manager removed - using registry-based approach (Task H1)
 #endif
 };
 

@@ -9,6 +9,10 @@ struct ggml_context;
 struct ggml_tensor;
 typedef int32_t llama_token;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief Internal utility functions for dataset operations.
  *
@@ -161,3 +165,7 @@ bool llama_dataset_cache_tensors(struct llama_dataset* dataset);
  * @return true on success, false on error
  */
 bool llama_dataset_validate_and_optimize_tensor_cache(struct llama_dataset* dataset);
+
+#ifdef __cplusplus
+}
+#endif

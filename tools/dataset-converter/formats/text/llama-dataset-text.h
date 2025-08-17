@@ -117,7 +117,7 @@
  * 
  * struct llama_dataset* dataset = llama_dataset_from_txt(&params, model);
  * if (!dataset) {
- *     fprintf(stderr, "Error: %s\n", llama_dataset_get_error_message());
+ *     const char* error = llama_dataset_get_error_message();
  *     return -1;
  * }
  * ```
@@ -159,7 +159,7 @@
  * @since 2024
  */
 
-#include "llama-dataset.h"
+#include "../../core/llama-dataset.h"
 
 // Forward declarations
 struct llama_model;
@@ -262,7 +262,7 @@ struct llama_dataset * llama_dataset_load_text_internal(const common_params * pa
  * llama_token tokens[1024];
  * int32_t n_tokens = llama_dataset_tokenize_line(model, line, strlen(line), tokens, 1024);
  * if (n_tokens < 0) {
- *     fprintf(stderr, "Tokenization failed with error code: %d\n", n_tokens);
+ *     const char* error = llama_dataset_get_error_message();
  * }
  * ```
  *
@@ -361,7 +361,7 @@ int32_t llama_dataset_tokenize_line(struct llama_model * model, const char * lin
  * struct llama_dataset* dataset = llama_dataset_from_txt(&params, model);
  * if (dataset && llama_dataset_is_streaming_enabled(dataset)) {
  *     if (!llama_dataset_optimize_text_sequence_cache(dataset)) {
- *         fprintf(stderr, "Cache optimization failed: %s\n", llama_dataset_get_error_message());
+ *         const char* error = llama_dataset_get_error_message();
  *     }
  * }
  * ```

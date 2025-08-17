@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "gguf.h"
+#include "../../core/llama-dataset.h"  // For error handling functions
 size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx);
 size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx) {
     if (!ctx) {
@@ -27,9 +28,8 @@ size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx) {
 
 bool llama_dataset_gguf_load_tensors(const struct gguf_context * gguf_ctx, struct ggml_context * ggml_ctx) {
     if (!gguf_ctx || !ggml_ctx) {
-        // DEPRECATED: Direct stderr output - use centralized error handling
-        #pragma message("DEPRECATED: Direct stderr output in GGUF utils - use centralized error handling system")
-        fprintf(stderr, "Invalid GGUF or GGML context\n");
+        // Use centralized error handling instead of direct stderr output
+        llama_dataset_set_error("Invalid GGUF or GGML context");
         return false;
     }
 
@@ -50,23 +50,23 @@ bool llama_dataset_gguf_load_tensors(const struct gguf_context * gguf_ctx, struc
     for (int i = 0; i < n_tensors; ++i) {
         const char * name = gguf_get_tensor_name(gguf_ctx, i);
         if (!name) {
-            // DEPRECATED: Direct stderr output - use centralized error handling
-            fprintf(stderr, "Failed to get tensor name for tensor %d\n", i);
+            // Use centralized error handling instead of direct stderr output
+            llama_dataset_set_error("Failed to get tensor name for tensor");
             return false;
         }
 
         // Validate tensor metadata
         size_t tensor_size = gguf_get_tensor_size(gguf_ctx, i);
         if (tensor_size == 0) {
-            // DEPRECATED: Direct stderr output - use centralized error handling
-            fprintf(stderr, "Invalid tensor size for tensor %s\n", name);
+            // Use centralized error handling instead of direct stderr output
+            llama_dataset_set_error("Invalid tensor size for tensor");
             return false;
         }
 
         enum ggml_type tensor_type = gguf_get_tensor_type(gguf_ctx, i);
         if (tensor_type >= GGML_TYPE_COUNT) {
-            // DEPRECATED: Direct stderr output - use centralized error handling
-            fprintf(stderr, "Invalid tensor type for tensor %s\n", name);
+            // Use centralized error handling instead of direct stderr output
+            llama_dataset_set_error("Invalid tensor type for tensor");
             return false;
         }
     }

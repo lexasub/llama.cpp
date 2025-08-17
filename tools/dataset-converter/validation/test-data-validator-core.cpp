@@ -221,7 +221,7 @@
 #include "test-data-validator-parquet.h"
 #include "test-data-validator-text.h"
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 

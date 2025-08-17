@@ -63,7 +63,7 @@
 #include <string>
 #include <thread>
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-impl.h"
 
 /**

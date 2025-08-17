@@ -42,7 +42,7 @@
 
 #include "streaming-read-ahead.h"
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-impl.h"
 
 /**

@@ -77,7 +77,7 @@
  * ```c
  * // Load all tensors from GGUF to GGML context
  * if (!llama_dataset_gguf_load_tensors(gguf_ctx, ggml_ctx)) {
- *     fprintf(stderr, "Failed to load tensors from GGUF file\n");
+ *     const char* error = llama_dataset_get_error_message();
  *     // Handle error...
  * }
  * 
@@ -89,13 +89,13 @@
  * ```c
  * // Comprehensive GGUF validation
  * if (!llama_dataset_gguf_validate_format(gguf_ctx)) {
- *     fprintf(stderr, "GGUF format validation failed\n");
+ *     const char* error = llama_dataset_get_error_message();
  *     return false;
  * }
  * 
  * // Validate metadata consistency
  * if (!llama_dataset_gguf_validate_metadata(gguf_ctx)) {
- *     fprintf(stderr, "GGUF metadata validation failed\n");
+ *     const char* error = llama_dataset_get_error_message();
  *     return false;
  * }
  * ```
@@ -343,7 +343,7 @@ size_t llama_dataset_gguf_get_data_size(const struct gguf_context * ctx);
  * struct ggml_context* ggml_ctx = ggml_init(ggml_params);
  * 
  * if (!llama_dataset_gguf_load_tensors(gguf_ctx, ggml_ctx)) {
- *     fprintf(stderr, "Failed to load tensors\n");
+ *     const char* error = llama_dataset_get_error_message();
  *     // Handle error and cleanup
  * }
  * 

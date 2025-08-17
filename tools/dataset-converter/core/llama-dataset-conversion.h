@@ -36,6 +36,13 @@ void llama_dataset_conversion_reset_progress(struct llama_dataset* dataset);
 bool llama_dataset_conversion_optimize_for_format(struct llama_dataset* dataset, int target_format);
 bool llama_dataset_conversion_apply_format_specific_settings(struct llama_dataset* dataset, int target_format);
 
+// Additional conversion utilities
+bool llama_dataset_conversion_estimate_output_size(const struct llama_dataset* dataset, const char* target_format, size_t* estimated_size);
+bool llama_dataset_conversion_batch_convert(struct llama_dataset** datasets, size_t dataset_count, const char* output_dir, const char* target_format);
+bool llama_dataset_conversion_verify_output(const char* output_filename, const struct llama_dataset* original_dataset);
+bool llama_dataset_conversion_get_supported_formats(const char*** formats, size_t* format_count);
+bool llama_dataset_conversion_is_format_supported(const char* format);
+
 #ifdef __cplusplus
 }
 #endif

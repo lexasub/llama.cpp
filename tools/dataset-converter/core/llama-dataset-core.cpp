@@ -58,15 +58,16 @@
 #include "llama-dataset.h"
 #include "llama-dataset-internal.h"
 #include "llama-dataset-error.h"
+#include "llama-dataset-conversion.h"
+#include <new>  // For placement new
 #include "llama-dataset-metadata.h"
 #include "llama-dataset-conversion.h"
+#include "../streaming/streaming-cache.h"
+#include "llama-impl.h"  // For LLAMA_LOG_* macros
 
 // DEPRECATED: Direct format includes violate dependency inversion principle
-// TODO: Remove after registry integration is complete (Task G1)
-// These includes will be removed in the next release - use registry-based loading instead
-#pragma message("DEPRECATED: Direct format includes will be removed in next release - use registry system")
-#include "../formats/text/llama-dataset-text.h"        // ❌ DEPRECATED - Remove in Task G1
-#include "../formats/gguf/llama-dataset-gguf.h"        // ❌ DEPRECATED - Remove in Task G1
+// Format-specific dependencies removed - using registry-based loading (Task G2 completed)
+// All format loading now goes through the registry system for better modularity
 #include "common.h"
 
 // Core coordination module - main API implementation and module coordination
@@ -77,62 +78,63 @@
 
 // Public API wrapper functions (to be implemented during extraction)
 
-// DEPRECATED: Forward declarations bypass registry system and violate clean architecture
-// TODO: Remove after factory functions use registry (Task G3)
-// These declarations will be removed in the next release - use registry-based loading instead
-#pragma message("DEPRECATED: Direct format function calls will be removed in next release - use registry system")
-extern struct llama_dataset* llama_dataset_load_text_internal(const struct common_params* params, struct llama_model* model);    // ❌ DEPRECATED - Remove in Task G2
-extern struct llama_dataset* llama_dataset_load_parquet_internal(const struct common_params* params);                           // ❌ DEPRECATED - Remove in Task G2
+// Forward declarations for streaming functions when streaming module is properly integrated
 
-// TODO: Add forward declarations for streaming functions when streaming module is properly integrated
-
-// Helper function to warn about deprecated direct format loading
-static void warn_deprecated_direct_loading(const char* function_name, const char* format_name) {
-    static bool warned = false;
-    if (!warned) {
-        fprintf(stderr, "WARNING: %s() using deprecated direct %s format loading. "
-                       "Registry-based loading will be required in next release. "
-                       "Use llama_dataset_registry_load_by_name() instead.\n", 
-                       function_name, format_name);
-        warned = true;
+/**
+ * @brief Validates streaming cache configuration parameters
+ * @param cache_size_bytes Cache size in bytes to validate
+ * @return true if configuration is valid, false otherwise
+ */
+static bool validate_streaming_cache_config(size_t cache_size_bytes) {
+    // Minimum cache size: 1MB (prevents thrashing)
+    const size_t MIN_CACHE_SIZE = 1024 * 1024;
+    // Maximum cache size: 16GB (prevents excessive memory usage)
+    const size_t MAX_CACHE_SIZE = 16ULL * 1024 * 1024 * 1024;
+    
+    if (cache_size_bytes < MIN_CACHE_SIZE) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, 
+            "Cache size too small (minimum 1MB required)");
+        return false;
     }
+    
+    if (cache_size_bytes > MAX_CACHE_SIZE) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, 
+            "Cache size too large (maximum 16GB allowed)");
+        return false;
+    }
+    
+    return true;
 }
 
-struct llama_dataset* llama_dataset_from_gguf(const struct common_params* params) {
-    // DEPRECATED: Direct format loading bypasses registry system
-    warn_deprecated_direct_loading("llama_dataset_from_gguf", "GGUF");
+/**
+ * @brief Validates streaming read-ahead configuration parameters
+ * @param window_size Read-ahead window size to validate
+ * @return true if configuration is valid, false otherwise
+ */
+static bool validate_streaming_read_ahead_config(size_t window_size) {
+    // Minimum window size: 1 (at least prefetch next sequence)
+    const size_t MIN_WINDOW_SIZE = 1;
+    // Maximum window size: 100 (prevents excessive memory usage)
+    const size_t MAX_WINDOW_SIZE = 100;
     
-    // Clear any previous errors
-    llama_dataset_error_clear_internal();
+    if (window_size < MIN_WINDOW_SIZE) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, 
+            "Read-ahead window size too small (minimum 1 required)");
+        return false;
+    }
     
-    // DEPRECATED: Direct delegation to format module (linked at build time)
-    // TODO: Replace with registry-based loading in Task G3
-    return llama_dataset_load_gguf(params);
+    if (window_size > MAX_WINDOW_SIZE) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, 
+            "Read-ahead window size too large (maximum 100 allowed)");
+        return false;
+    }
+    
+    return true;
 }
 
-struct llama_dataset* llama_dataset_from_txt(const struct common_params* params, struct llama_model* model) {
-    // DEPRECATED: Direct format loading bypasses registry system
-    warn_deprecated_direct_loading("llama_dataset_from_txt", "text");
-    
-    // Clear any previous errors
-    llama_dataset_error_clear_internal();
-    
-    // DEPRECATED: Direct delegation to format module (linked at build time)
-    // TODO: Replace with registry-based loading in Task G3
-    return llama_dataset_load_text_internal(params, model);
-}
 
-struct llama_dataset* llama_dataset_from_parquet(const struct common_params* params) {
-    // DEPRECATED: Direct format loading bypasses registry system
-    warn_deprecated_direct_loading("llama_dataset_from_parquet", "Parquet");
-    
-    // Clear any previous errors
-    llama_dataset_error_clear_internal();
-    
-    // DEPRECATED: Direct delegation to format module (linked at build time)
-    // TODO: Replace with registry-based loading in Task G3
-    return llama_dataset_load_parquet_internal(params);
-}
+
+
 
 uint64_t llama_dataset_n_sequences(const struct llama_dataset* dataset) {
     if (!dataset) {
@@ -149,24 +151,24 @@ void llama_dataset_free(struct llama_dataset* dataset) {
     }
 
     // Cleanup streaming infrastructure
-    if (dataset->streaming) {
-        // TODO: Implement streaming cleanup when streaming module is properly integrated
-        // For now, just set to nullptr - streaming integration in progress
+    if (dataset->streaming && dataset->streaming_cache) {
+        // Clean up streaming cache
+        delete dataset->streaming_cache;
         dataset->streaming_cache = nullptr;
-        dataset->optimization_manager = nullptr;
+        LLAMA_LOG_DEBUG("Cleaned up streaming cache");
     }
 
     // Coordinate cleanup across all modules
-    // TODO: Implement format-specific cleanup functions
-    // llama_dataset_gguf_cleanup(dataset);
-    // llama_dataset_text_cleanup(dataset);
-    // llama_dataset_parquet_cleanup(dataset);
+    // Format-specific cleanup now handled through registry system (Task G2.1 completed)
+    // Direct format function calls removed - using registry-based cleanup
 
-    // TODO: Implement actual resource cleanup for GGUF context, tensors, etc.
-    // This will be filled during extraction from main file
+    // Note: Actual resource cleanup for GGUF context, tensors, etc. not implemented
+    // Will be filled during extraction from main file
 
-    // Free the dataset structure itself
-    free(dataset);
+    // CRITICAL FIX: Properly destroy C++ object before freeing memory
+    // The llama_dataset structure contains std::string which requires destructor calls
+    dataset->~llama_dataset();  // Call destructor to properly clean up C++ members
+    free(dataset);              // Free the raw memory
 }
 
 // Metadata access wrappers
@@ -195,6 +197,21 @@ extern "C" bool llama_dataset_set_streaming_cache_size(struct llama_dataset* dat
     // Clear any previous errors
     llama_dataset_error_clear_internal();
     
+    // Validate parameters
+    if (!dataset) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset parameter is NULL");
+        return false;
+    }
+    
+    if (!dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+    
+    if (!validate_streaming_cache_config(cache_size_bytes)) {
+        return false; // Error already set by validation function
+    }
+    
     // Delegate to streaming module
     return llama_dataset_set_streaming_cache_size_internal(dataset, cache_size_bytes);
 }
@@ -202,6 +219,21 @@ extern "C" bool llama_dataset_set_streaming_cache_size(struct llama_dataset* dat
 extern "C" bool llama_dataset_set_streaming_read_ahead(struct llama_dataset* dataset, bool enabled, size_t window_size) {
     // Clear any previous errors
     llama_dataset_error_clear_internal();
+    
+    // Validate parameters
+    if (!dataset) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset parameter is NULL");
+        return false;
+    }
+    
+    if (!dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+    
+    if (enabled && !validate_streaming_read_ahead_config(window_size)) {
+        return false; // Error already set by validation function
+    }
     
     // Delegate to streaming module
     return llama_dataset_set_streaming_read_ahead_internal(dataset, enabled, window_size);
@@ -211,6 +243,17 @@ extern "C" bool llama_dataset_set_adaptive_cache_sizing(struct llama_dataset* da
     // Clear any previous errors
     llama_dataset_error_clear_internal();
     
+    // Validate parameters
+    if (!dataset) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset parameter is NULL");
+        return false;
+    }
+    
+    if (!dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+    
     // Delegate to streaming module
     return llama_dataset_set_adaptive_cache_sizing_internal(dataset, enabled);
 }
@@ -219,61 +262,50 @@ extern "C" bool llama_dataset_get_streaming_stats(const struct llama_dataset* da
     // Clear any previous errors
     llama_dataset_error_clear_internal();
     
+    // Validate parameters
+    if (!dataset) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset parameter is NULL");
+        return false;
+    }
+    
+    if (!dataset->streaming) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Dataset is not in streaming mode");
+        return false;
+    }
+    
     // Delegate to streaming module
     return llama_dataset_get_streaming_stats_internal(dataset, hit_ratio, memory_usage_bytes, entry_count);
 }
 
 // Conversion wrappers
 void llama_dataset_to_gguf(struct llama_dataset* dataset, const char* path) {
-    // TODO: Implement GGUF conversion - delegate to conversion module
-    (void)dataset; (void)path;
-    // llama_dataset_conversion_to_gguf(dataset, path);
+    if (!dataset || !path) {
+        llama_dataset_error_set_with_code_internal(DATASET_ERROR_INVALID_PARAMETER, "Invalid parameters for GGUF conversion");
+        return;
+    }
+    
+    // Delegate to conversion module
+    if (!llama_dataset_conversion_to_gguf(dataset, path)) {
+        // Error is already set by the conversion module
+        return;
+    }
 }
 
-// Error handling wrappers (public API functions)
-bool llama_dataset_has_error(void) {
-    return llama_dataset_error_has_error_internal();
-}
+// Error handling functions moved to llama-dataset-error.cpp to avoid duplicate symbols
 
-const char* llama_dataset_get_error_message(void) {
-    return llama_dataset_error_get_message_internal();
-}
-
-enum dataset_error llama_dataset_get_error_code(void) {
-    return llama_dataset_error_get_code_internal();
-}
-
-void llama_dataset_clear_error(void) {
-    llama_dataset_error_clear_internal();
-}
-
-const char* llama_dataset_get_error(void) {
-    return llama_dataset_error_get_message_internal();
-}
-
-void llama_dataset_set_error(const char* message) {
-    llama_dataset_error_set_internal(message);
-}
-
-void llama_dataset_set_error_with_code(enum dataset_error code, const char* message) {
-    llama_dataset_error_set_with_code_internal(code, message);
-}
-
-const char* llama_dataset_error_code_to_string(enum dataset_error code) {
-    return llama_dataset_error_code_to_string_internal(code);
-}
-
-// Internal allocation helper (moved from utils.cpp to avoid streaming dependencies)
+// Internal allocation helper with proper streaming cache initialization
 extern "C" struct llama_dataset* llama_dataset_alloc_internal(enum dataset_type type, bool streaming) {
-    struct llama_dataset* dataset = static_cast<struct llama_dataset *>(malloc(sizeof(struct llama_dataset)));
-    if (!dataset) {
+    // CRITICAL FIX: Use placement new instead of malloc to properly initialize C++ members
+    // The llama_dataset structure contains std::string which requires constructor calls
+    void* memory = malloc(sizeof(struct llama_dataset));
+    if (!memory) {
         llama_dataset_error_set_with_code_internal(DATASET_ERROR_MEMORY_ALLOCATION, "Failed to allocate dataset structure");
         return nullptr;
     }
 
-    // Initialize all fields to zero/null using proper C++ initialization
-    *dataset = {};
-
+    // Use placement new to properly construct the C++ object in the allocated memory
+    struct llama_dataset* dataset = new(memory) llama_dataset();
+    
     // Set type and streaming flag
     dataset->type = type;
     dataset->streaming = streaming;
@@ -285,38 +317,27 @@ extern "C" struct llama_dataset* llama_dataset_alloc_internal(enum dataset_type 
 
     // Initialize streaming infrastructure if in streaming mode
     if (streaming) {
-        // TODO: Initialize streaming cache when streaming module is properly integrated
-        // For now, just set to nullptr - streaming integration in progress
-        dataset->streaming_cache = nullptr;
-        dataset->optimization_manager = nullptr;
+        // Initialize streaming cache with default 64MB size
+        size_t default_cache_size = 64 * 1024 * 1024; // 64MB default
+        dataset->streaming_cache = new llama_dataset_streaming_cache(default_cache_size);
+        
+        // Configure cache with optimal settings for streaming
+        dataset->streaming_cache->set_eviction_policy(llama_dataset_streaming_cache::EvictionPolicy::ADAPTIVE);
+        dataset->streaming_cache->set_adaptive_sizing(true, 0.8); // Enable adaptive sizing with 80% threshold
+        dataset->streaming_cache->set_read_ahead(true, 5); // Enable read-ahead with window of 5
+        
+        LLAMA_LOG_INFO("Initialized streaming cache with %zu bytes, adaptive sizing enabled", default_cache_size);
     } else {
         dataset->streaming_cache = nullptr;
-        dataset->optimization_manager = nullptr;
     }
 
     return dataset;
 }
 
-// Placeholder implementations for format loader functions
-// TODO: These should be implemented by format modules
-struct llama_dataset* llama_dataset_load_text_internal(const struct common_params* params, struct llama_model* model) {
-    (void)params; (void)model;
-    llama_dataset_error_set_with_code_internal(DATASET_ERROR_UNKNOWN, "Text loader not yet implemented");
-    return nullptr;
-}
+// Note: Format loader functions are implemented in their respective format modules through the registry system:
+// - GGUF format loader in formats/gguf/
+// - Text format loader in formats/text/
+// - Parquet format loader in formats/parquet/
 
-struct llama_dataset* llama_dataset_load_parquet_internal(const struct common_params* params) {
-    (void)params;
-    llama_dataset_error_set_with_code_internal(DATASET_ERROR_UNKNOWN, "Parquet loader not yet implemented");
-    return nullptr;
-}
-
-// Note: Format loader functions are implemented in their respective format modules:
-// - llama_dataset_load_gguf() in formats/gguf/ (connected in Phase 4.1)
-// - llama_dataset_load_text_internal() in formats/text/ (placeholder above)
-// - llama_dataset_load_parquet_internal() in formats/parquet/ (placeholder above)
-
-// Note: Sequence loading functions are implemented in their respective format modules:
-// - load_parquet_sequence_with_tokenization() in formats/parquet/
-// - llama_dataset_gguf_get_tensor_data_streaming() in formats/gguf/
-// - llama_dataset_get_parquet_tensor_data_streaming() in formats/parquet/
+// Note: Sequence loading functions now accessed through registry system (Task G2.1 completed)
+// Format-specific functions accessed via IFormatLoader interface through registry

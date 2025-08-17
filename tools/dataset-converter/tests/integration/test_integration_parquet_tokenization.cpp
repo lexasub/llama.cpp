@@ -41,8 +41,8 @@ static const int LARGE_DATASET_SIZE = 10000;
 
 // Helper to create test Parquet file with raw text
 static bool create_test_parquet_with_text(const char* filepath, int sequence_count) {
-    // TODO: Implement Parquet file creation with raw text data
-    // This would use Apache Arrow C++ to create a Parquet file with text column
+    // TODO: Implement Parquet file creation with raw text data using Apache Arrow C++
+    // Would create a Parquet file with text column for testing tokenization pipeline
     // For now, create a placeholder file
     std::ofstream file(filepath);
     if (!file.is_open()) {
@@ -60,7 +60,7 @@ static bool create_test_parquet_with_text(const char* filepath, int sequence_cou
 
 // Helper to create test Parquet file with mixed content (text and pre-tokenized)
 static bool create_test_parquet_mixed_content(const char* filepath) {
-    // TODO: Implement mixed content Parquet creation
+    // TODO: Implement mixed content Parquet creation for comprehensive testing
     std::ofstream file(filepath);
     if (!file.is_open()) {
         return false;
@@ -103,7 +103,7 @@ static void cleanup_test_files() {
 
 // Validation wrapper with error checking
 static bool validate_gguf_test_file_wrapper(const char* filepath) {
-    // TODO: Call actual validate_gguf_test_file() when available
+    // TODO: Call actual validate_gguf_test_file() when validation function is implemented
     std::ifstream file(filepath);
     if (!file.is_open()) {
         return false;
@@ -130,31 +130,38 @@ static bool test_raw_text_parquet_to_gguf_pipeline() {
     // Create test Parquet file with raw text
     TEST_ASSERT(create_test_parquet_with_text(TEST_RAW_PARQUET_PATH), "Failed to create test Parquet file with raw text");
     
-    // TODO: Configure common_params with dataset_tokenize_text = true
-    // common_params params;
-    // params.dataset_tokenize_text = true;
-    // params.text_column = TEXT_COLUMN_NAME;
-    // params.input_file = TEST_RAW_PARQUET_PATH;
-    // params.output_file = TEST_OUTPUT_GGUF_PATH;
+    // TODO: Implement complete tokenization pipeline test when APIs are available
+    // Steps needed:
+    // 1. Configure common_params with dataset_tokenize_text = true
+    // 2. Load dataset using llama_dataset_from_parquet() with tokenization enabled
+    // 3. Validate the loaded dataset has correct sequence count and tokenized content
+    // 4. Convert to GGUF using llama_dataset_to_gguf()
+    // 5. Verify conversion success
+    /*
+    common_params params;
+    params.dataset_tokenize_text = true;
+    params.text_column = TEXT_COLUMN_NAME;
+    params.input_file = TEST_RAW_PARQUET_PATH;
+    params.output_file = TEST_OUTPUT_GGUF_PATH;
     
-    // TODO: Load dataset using llama_dataset_from_parquet() with tokenization enabled
-    // auto dataset = llama_dataset_from_parquet(TEST_RAW_PARQUET_PATH, params);
-    // TEST_ASSERT(dataset != nullptr);
+    auto dataset = llama_dataset_from_parquet(TEST_RAW_PARQUET_PATH, params);
+    TEST_ASSERT(dataset != nullptr);
+    TEST_ASSERT(dataset->sequence_count == TEST_SEQUENCE_COUNT);
+    TEST_ASSERT(dataset->sequences[0].tokens.size() > 0);
     
-    // TODO: Validate the loaded dataset has correct sequence count and tokenized content
-    // TEST_ASSERT(dataset->sequence_count == TEST_SEQUENCE_COUNT);
-    // TEST_ASSERT(dataset->sequences[0].tokens.size() > 0);
-    
-    // TODO: Convert to GGUF using llama_dataset_to_gguf()
-    // bool conversion_success = llama_dataset_to_gguf(dataset, TEST_OUTPUT_GGUF_PATH);
-    // TEST_ASSERT(conversion_success);
+    bool conversion_success = llama_dataset_to_gguf(dataset, TEST_OUTPUT_GGUF_PATH);
+    TEST_ASSERT(conversion_success);
+    */
     
     // Validate the output GGUF file
     TEST_ASSERT(validate_gguf_test_file_wrapper(TEST_OUTPUT_GGUF_PATH), "Failed to validate output GGUF file");
     
-    // TODO: Reload the GGUF file and verify data integrity
-    // auto reloaded_dataset = llama_dataset_from_gguf(TEST_OUTPUT_GGUF_PATH);
-    // TEST_ASSERT(reloaded_dataset != nullptr);
+    // TODO: Implement GGUF file reload and data integrity verification
+    // Would reload the GGUF file and verify data integrity matches original
+    /*
+    auto reloaded_dataset = llama_dataset_from_gguf(TEST_OUTPUT_GGUF_PATH);
+    TEST_ASSERT(reloaded_dataset != nullptr);
+    */
     // TEST_ASSERT(reloaded_dataset->sequence_count == dataset->sequence_count);
     
     std::cout << "test_raw_text_parquet_to_gguf_pipeline: PASSED" << std::endl;
@@ -168,10 +175,12 @@ static bool test_tokenization_accuracy_validation() {
     // Create Parquet file with known text content
     TEST_ASSERT(create_test_parquet_with_text(TEST_RAW_PARQUET_PATH, 10), "Failed to create test Parquet file with known text content");
     
-    // TODO: Load with tokenization enabled
-    // auto dataset = llama_dataset_from_parquet(TEST_RAW_PARQUET_PATH, params);
-    
-    // TODO: Access token sequences and validate they contain expected token patterns
+    // TODO: Implement tokenization validation test when APIs are available
+    // Would load with tokenization enabled and validate token patterns
+    /*
+    auto dataset = llama_dataset_from_parquet(TEST_RAW_PARQUET_PATH, params);
+    // Access token sequences and validate they contain expected token patterns
+    */
     // for (int i = 0; i < dataset->sequence_count; ++i) {
     //     auto& sequence = dataset->sequences[i];
     //     TEST_ASSERT(sequence.tokens.size() > 0);

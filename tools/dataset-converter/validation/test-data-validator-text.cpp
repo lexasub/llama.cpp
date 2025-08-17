@@ -193,7 +193,7 @@
 #include "test-data-validator-common.h"
 #include "test-data-validator-core.h"
 
-#include "common/log.h"
+#include "log.h"
 #include "llama-dataset-internal.h"
 #include "llama-impl.h"
 
