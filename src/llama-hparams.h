@@ -442,6 +442,37 @@ struct llama_hparams {
         return false;
     }
 
+    static std::pair<llama_pos, llama_pos> compute_swa_window(
+    llama_swa_type swa_type, uint32_t n_swa, llama_pos p1) {
+
+        llama_pos lo = 0;
+        llama_pos hi = INT32_MAX;
+
+        switch (swa_type) {
+            case LLAMA_SWA_TYPE_STANDARD:
+                lo = std::max((llama_pos) 0, p1 + 1 - (llama_pos) n_swa);
+                break;
+
+            case LLAMA_SWA_TYPE_CHUNKED:
+                lo = (p1 / (llama_pos) n_swa) * (llama_pos) n_swa;
+                break;
+
+            case LLAMA_SWA_TYPE_SYMMETRIC:
+            {
+                const llama_pos half_n_swa = (llama_pos) n_swa / 2;
+                lo = std::max((llama_pos) 0, p1 - half_n_swa);
+                hi = p1 + half_n_swa + 1;
+            }
+            break;
+
+            case LLAMA_SWA_TYPE_NONE:
+            default:
+                break; // lo = 0, hi = INT32_MAX
+        }
+
+        return {lo, hi};
+    }
+
 
     bool use_mrope() const;
 };

@@ -1,5 +1,6 @@
 #include "llama-kv-cache.h"
 
+#include "llama-hparams.h"
 #include "llama-impl.h"
 #include "llama-io.h"
 #include "llama-model.h"
@@ -1536,9 +1537,7 @@ struct args_set_input_kq_mask {
 
 template<typename T, bool causal, bool swa, bool is_2d, bool alibi>
 static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
-  //const auto & hparams = args.hparams;
     const auto & ubatch  = args.ubatch;
-
     const auto & v_cells       = args.v_cells;
     const auto & seq_to_stream = args.seq_to_stream;
 
@@ -1558,7 +1557,6 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
 
     for (uint32_t i = 0; i < ubatch->n_tokens; ++i) {
         const llama_seq_id seq_id = ubatch->seq_id[i][0];
-
         seq_pos_min[seq_id] = std::min(seq_pos_min[seq_id], ubatch->pos[i]);
     }
 
@@ -1568,20 +1566,24 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
         std::unordered_map<llama_seq_id, std::vector<uint32_t>> seq_idxs;
 
         for (uint32_t ii = 0; ii < n_tps; ++ii) {
-            const uint32_t i = s*n_tps + ii;
-
+            const uint32_t i = s * n_tps + ii;
             const llama_seq_id seq_id = ubatch->seq_id[i][0];
-
             const auto & cells = v_cells.at(seq_to_stream[seq_id]);
 
-                  llama_pos p0 = -1;
             const llama_pos p1 = ubatch->pos[i];
-
             // for M-RoPE
-            const llama_pos p1_x = is_2d ? ubatch->pos[i + ubatch->n_tokens*2] : 0;
-            const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]   : 0;
+            const llama_pos p1_x = is_2d ? ubatch->pos[i + ubatch->n_tokens * 2] : 0;
+            const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]     : 0;
 
-            const uint64_t idst = n_kv*i;
+            const uint64_t idst = n_kv * i;
+
+            // Hoist SWA window computation out of the cell loop
+            llama_pos swa_lo = 0, swa_hi = n_kv;
+            if constexpr (swa) {
+                auto [lo, hi] = llama_hparams::compute_swa_window(swa_type, n_swa, p1);
+                swa_lo = lo;
+                swa_hi = hi;
+            }
 
             // for tokens of the same sequence, the mask is mostly the same, so we can reuse it
             // the only cells that could change are the ones that are with similar positions as the
@@ -1590,22 +1592,17 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             // note: this optimization is not compatible with Alibi position encoding
             // ref:  https://github.com/ggml-org/llama.cpp/pull/18842
             bool prev = false;
-
             auto & idxs = seq_idxs[seq_id];
 
-            if (!alibi) {
+            if constexpr (!alibi) {
                 if (seq_srct.find(seq_id) != seq_srct.end()) {
                     const uint32_t srct = seq_srct[seq_id];
-
-                    const uint64_t idst_prev = n_kv*srct;
-
+                    const uint64_t idst_prev = n_kv * srct;
                     std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
-
                     prev = true;
                 } else {
                     idxs.clear();
                     idxs.reserve(ubatch->n_tokens + n_swa + 32);
-
                     seq_srct[seq_id] = i;
                 }
             }
@@ -1613,29 +1610,24 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             for (uint32_t jj = 0; jj < n_kv; ++jj) {
                 uint32_t j = jj;
 
-                // we have an exiting mask for this sequence -> update just seq_idxs
-                if (!alibi) {
+                if constexpr (!alibi) {
                     if (prev) {
                         if (jj >= idxs.size()) {
                             break;
                         }
-
                         j = idxs[jj];
                     }
                 }
 
-                if (cells.is_empty(j)) {
-                    goto skip;
+                // mask the token if not the same sequence or empty
+                if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
+                    data[idst + j] = mask_drop;
+                    continue;
                 }
 
-                // mask the token if not the same sequence
-                if (!cells.seq_has(j, seq_id)) {
-                    goto skip;
-                }
+                const llama_pos p0 = cells.pos_get(j);
 
-                p0 = cells.pos_get(j);
-
-                if (!alibi) {
+                if constexpr (!alibi) {
                     if (!prev) {
                         // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
                         if (p0 + (int32_t) (n_swa + 32) >= seq_pos_min[seq_id]) {
@@ -1644,40 +1636,34 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
                     }
                 }
 
-                if (causal) {
-                    // mask future tokens
-                    if (p0 > p1) {
-                        goto skip;
+                if constexpr (causal) {
+                    if (p0 > p1) { // mask future tokens
+                        data[idst + j] = mask_drop;
+                        continue;
                     }
-
-                    // M-RoPE causal mask
-                    if (is_2d) {
+                    if constexpr (is_2d) {
                         if (p0 == p1) {
-                            const auto & p0_ext = cells.ext_get(j);
-
-                            if (p0_ext.is_2d_gt(p1_x, p1_y)) {
-                                goto skip;
+                            if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
+                                data[idst + j] = mask_drop;
+                                continue;
                             }
                         }
                     }
                 }
 
-                // apply SWA if any
-                if (swa) {
-                    if (llama_hparams::is_masked_swa(n_swa, swa_type, p0, p1)) {
-                        goto skip;
+                // apply SWA masking
+                if constexpr (swa) {
+                    if (p0 < swa_lo || p0 >= swa_hi) {
+                        data[idst + j] = mask_drop;
+                        continue;
                     }
                 }
 
-                if (alibi) {
+                if constexpr (alibi) {
                     data[idst + j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
                 } else {
                     data[idst + j] = mask_keep;
                 }
-
-                continue;
-skip:
-                data[idst + j] = mask_drop;
             }
         }
     }
