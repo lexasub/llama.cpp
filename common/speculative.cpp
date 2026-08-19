@@ -1114,28 +1114,17 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             // when no explicit devices are configured, the draft and target share the
             // default devices (single-GPU case) - assume compatible.
             const ggml_tensor * fused = llama_get_embeddings_layer_inp_tensor(ctx_tgt);
-            if (fused && fused->buffer && !this->params.devices.empty()) {
-                const ggml_backend_dev_t fused_dev = ggml_backend_buft_get_device(
-                        ggml_backend_buffer_get_type(fused->buffer));
-                bool compatible = false;
-                for (const auto & dev : this->params.devices) {
-                    if (dev == fused_dev) {
-                        compatible = true;
-                        break;
+            if (fused) {
+                if (fused->buffer && !params.devices.empty()) {
+                    const ggml_backend_dev_t fused_dev = ggml_backend_buft_get_device(
+                            ggml_backend_buffer_get_type(fused->buffer));
+                    if (std::find(params.devices.begin(), params.devices.end(), fused_dev) != params.devices.end()) {
+                        // event-based cross-stream sync: the draft backends wait on the GPU
+                        // stream for the fused write to complete (no host block).
+                        llama_embd_layer_inp_wait(ctx_tgt, ctx_dft);
+                    } else {
+                        fused = nullptr;
                     }
-                }
-                if (!compatible) {
-                    fused = nullptr;
-                }
-            }
-            static bool fused_logged = false;
-            if (!fused_logged) {
-                fused_logged = true;
-                if (fused) {
-                    LOG_INF("%s: DFlash zero-copy embd path active (fused tensor %s)\n",
-                            __func__, fused->name ? fused->name : "?");
-                } else {
-                    LOG_INF("%s: DFlash host embd path active (no fused tensor)\n", __func__);
                 }
             }
 
@@ -1177,11 +1166,24 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 return false;
             }
 
-            const float * inp_g = llama_get_embeddings_nextn(ctx_dft);
-            GGML_ASSERT(inp_g && "DFlash encoder produced no output.");
+            // zero-copy nextn path: the encoder wrote its output (t_h_nextn) into a
+            // persistent device buffer; alias it for the decoder KV-injection instead
+            // of a host read + H2D copy. same context/stream, so ordering is guaranteed.
+            const ggml_tensor * nextn_persist = llama_get_embeddings_nextn_tensor(ctx_dft);
+            if (nextn_persist) {
+                batch_inject.embd     = nullptr;
+                batch_inject.embd_dev = (ggml_tensor *) nextn_persist;
+            } else {
+                const float * inp_g = llama_get_embeddings_nextn(ctx_dft);
+                GGML_ASSERT(inp_g && "DFlash encoder produced no output.");
 
+                batch_inject.embd_dev = nullptr;
+                std::memcpy(batch_inject.embd, inp_g, (size_t) n_chunk * n_embd_dec * sizeof(float));
+            }
+
+            // inject the DFlash decoder K/V cache at the tokens' target positions
             batch_inject.n_tokens = n_chunk;
-            std::memcpy(batch_inject.embd, inp_g, (size_t) n_chunk * n_embd_dec * sizeof(float));
+            batch_inject.embd_dev_off = 0;
             for (int32_t i = 0; i < n_chunk; ++i) {
                 const int32_t j = offset + i;
                 GGML_ASSERT(batch_in.n_seq_id[j] == 1);
@@ -1199,9 +1201,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                         __func__, rc, (int) n_chunk, (int) offset);
                 return false;
             }
-            // The server may switch contexts before the next draft decode.
-            llama_synchronize(ctx_dft);
         }
+
+        // The server may switch contexts before the next draft decode. Wait once for
+        // the whole prefill: the encoder/inject work on ctx_dft is stream-ordered on
+        // the same backends, so a single sync at the end covers every chunk.
+        llama_synchronize(ctx_dft);
 
         return true;
     }
