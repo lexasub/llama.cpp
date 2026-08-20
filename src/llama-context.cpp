@@ -2110,6 +2110,9 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
     // alloc only when more than the current capacity is required
     // TODO: also consider shrinking the buffer
     if (!buf_output || prev_size < new_size) {
+        // try to use the host buffer of the device where the output tensor is allocated for faster transfer to system memory
+        auto * output_dev = model.dev_output();
+        auto * buft = output_dev ? ggml_backend_dev_host_buffer_type(output_dev) : ggml_backend_cpu_buffer_type();
         if (buf_output) {
 #ifndef NDEBUG
             // This doesn't happen often, but may be annoying in some cases (like the HellaSwag benchmark)
@@ -2117,22 +2120,12 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
 #endif
             synchronize();
 
-            // TODO: not needed?
-            buf_output = nullptr;
             logits.data = nullptr;
             embd.data = nullptr;
             embd_nextn.data = nullptr;
             for (auto & layer_inp : embd_layer_inp) {
                 layer_inp = {nullptr, 0};
             }
-        }
-
-        auto * buft = ggml_backend_cpu_buffer_type();
-        // try to use the host buffer of the device where the output tensor is allocated for faster transfer to system memory
-        auto * output_dev = model.dev_output();
-        auto * output_dev_host_buft = output_dev ? ggml_backend_dev_host_buffer_type(output_dev) : nullptr;
-        if (output_dev_host_buft) {
-            buft = output_dev_host_buft;
         }
         buf_output.reset(ggml_backend_buft_alloc_buffer(buft, new_size));
         if (buf_output == nullptr) {
