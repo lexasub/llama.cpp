@@ -1537,7 +1537,6 @@ struct args_set_input_kq_mask {
 
 template <typename T, bool causal, bool swa, bool is_2d, bool alibi, bool prev>
 static void apply_mask(T *                                                                    data,
-                       const uint64_t                                                         idst,
                        const int64_t                                                          n_kv,
                        const std::vector<llama_kv_cells>::value_type &                        cells,
                        const llama_ubatch *                                                   ubatch,
@@ -1561,13 +1560,13 @@ static void apply_mask(T *                                                      
 
             if constexpr (causal) {
                 if (p0 > p1) { 
-                    data[idst + j] = mask_drop;
+                    data[j] = mask_drop;
                     continue; 
                 }
                 if constexpr (is_2d) {
                     if (p0 == p1) {
                         if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
-                            data[idst + j] = mask_drop;
+                            data[j] = mask_drop;
                             continue;
                         }
                     }
@@ -1577,20 +1576,20 @@ static void apply_mask(T *                                                      
             if constexpr (swa) {
                 const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
                 if (drop) {
-                    data[idst + j] = mask_drop;
+                    data[j] = mask_drop;
                     continue;
                 }
             }
             if constexpr (alibi) {
-                data[idst + j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+                data[j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
             } else {
-                data[idst + j] = mask_keep;
+                data[j] = mask_keep;
             }
         }
     } else {
         for (uint32_t j = 0; j < n_kv; ++j) {
             if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
-                data[idst + j] = mask_drop;
+                data[j] = mask_drop;
                 continue;
             }
 
@@ -1616,9 +1615,9 @@ static void apply_mask(T *                                                      
             }
 
             if constexpr (alibi) {
-                data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+                data[j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
             } else {
-                data[idst + j] = drop ? mask_drop : mask_keep;
+                data[j] = drop ? mask_drop : mask_keep;
             }
         }
     }
@@ -1680,17 +1679,17 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
                     const uint64_t idst_prev = n_kv * srct;
                     std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
                     apply_mask<T, causal, swa, is_2d, alibi, true>
-                        (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                        (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
                 } else {
                     idxs.clear();
                     idxs.reserve(ubatch->n_tokens + n_swa + 32);
                     seq_srct[seq_id] = i;
                     apply_mask<T, causal, swa, is_2d, alibi, false>
-                        (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                        (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
                 }
             } else {
                 apply_mask<T, causal, swa, is_2d, alibi, false>
-                    (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                    (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
             }
         }
     }
