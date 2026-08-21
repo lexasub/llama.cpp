@@ -1556,16 +1556,7 @@ static void apply_mask(T *                                                      
     const auto swa_diap = _swa_diap;
 
     if constexpr (prev) {
-        const size_t idxs_size = idxs.size();
-        for (uint32_t jj = 0; jj < idxs_size; ++jj) {
-            const uint32_t j = idxs[jj];
-
-            if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
-                
-                data[idst + j] = mask_drop;
-                continue;
-            }
-
+        for (uint32_t j : idxs) {
             const llama_pos p0 = cells.pos_get(j);
 
             if constexpr (causal) {
@@ -1611,36 +1602,23 @@ static void apply_mask(T *                                                      
                     idxs.push_back(j);
                 }
             }
+            bool drop = false;
 
             if constexpr (causal) {
-                if (p0 > p1) {
-                    data[idst + j] = mask_drop;
-                    continue;
-                }
+                drop = drop || (p0 > p1);
                 if constexpr (is_2d) {
-                    if (p0 == p1) {
-                        if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
-                            data[idst + j] = mask_drop;
-                            continue;
-                        }
-                    }
+                    drop = drop || (p0 == p1 && cells.ext_get(j).is_2d_gt(p1_x, p1_y));
                 }
             }
 
-            // apply SWA masking
             if constexpr (swa) {
-                const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
-                if constexpr (alibi) {
-                    data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
-                } else {
-                    data[idst + j] = drop ? mask_drop : mask_keep;
-                }
+                drop = drop || (p0 < swa_diap.first) || (p0 >= swa_diap.second);
+            }
+
+            if constexpr (alibi) {
+                data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
             } else {
-                if constexpr (alibi) {
-                    data[idst + j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
-                } else {
-                    data[idst + j] = mask_keep;
-                }
+                data[idst + j] = drop ? mask_drop : mask_keep;
             }
         }
     }
