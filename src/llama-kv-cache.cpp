@@ -1673,7 +1673,7 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
                 if (seq_srct.find(seq_id) != seq_srct.end()) {
                     const uint32_t srct = seq_srct[seq_id];
                     const uint64_t idst_prev = n_kv * srct;
-                    std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
+                    std::memcpy(data + idst, data + idst_prev, n_kv * sizeof(T));
                     apply_mask<T, causal, swa, is_2d, alibi, true>
                         (data + idst, n_kv, cells, ubatch, 0, i, swa_diap, idxs);
                 } else {
