@@ -1556,74 +1556,74 @@ static void apply_mask(T *                                                      
     const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]   : 0;
     llama_pos p0 = -1;
 
-    for (uint32_t jj = 0; jj < n_kv; ++jj) {
-        uint32_t j = jj;
+    if (prev) {
+        for (uint32_t jj = 0; jj < idxs.size(); ++jj) {
+            // we have an exiting mask for this sequence -> update just seq_idxs
+            uint32_t j = idxs[jj];
 
-        // we have an exiting mask for this sequence -> update just seq_idxs
-        if (!alibi) {
-            if (prev) {
-                if (jj >= idxs.size()) {
-                    break;
-                }
-
-                j = idxs[jj];
+            if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
+                data[j] = mask_drop;
+                continue;
             }
+
+            if constexpr (causal || swa) {
+                p0 = cells.pos_get(j);
+            }
+            bool drop = false;
+            if constexpr (causal) {
+                // M-RoPE causal mask
+                if (is_2d) {
+                    drop = (p0 > p1) || ((p0 == p1) && cells.ext_get(j).is_2d_gt(p1_x, p1_y));
+                } else {
+                    drop = p0 > p1;
+                }
+            }
+
+            // apply SWA if any
+            if constexpr(swa) {
+                drop = drop || llama_hparams::is_masked_swa(n_swa, swa_type, p0, p1);
+            }
+
+            data[j] = drop ? mask_drop : mask_keep;
         }
+    } else {
+        for (uint32_t j = 0; j < n_kv; ++j) {
 
-        if (cells.is_empty(j)) {
-            goto skip;
-        }
+            if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
+                data[j] = mask_drop;
+                continue;
+            }
 
-        // mask the token if not the same sequence
-        if (!cells.seq_has(j, seq_id)) {
-            goto skip;
-        }
+            p0 = cells.pos_get(j);
 
-        p0 = cells.pos_get(j);
-
-        if (!alibi) {
-            if (!prev) {
+            if constexpr (!alibi) {
                 // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
                 if (p0 >= min_p) {
                     idxs.push_back(j);
                 }
             }
-        }
 
-        if (causal) {
-            // mask future tokens
-            if (p0 > p1) {
-                goto skip;
-            }
-
-            // M-RoPE causal mask
-            if (is_2d) {
-                if (p0 == p1) {
-                    const auto & p0_ext = cells.ext_get(j);
-
-                    if (p0_ext.is_2d_gt(p1_x, p1_y)) {
-                        goto skip;
-                    }
+            bool drop = false;
+            if constexpr (causal) {
+                // M-RoPE causal mask
+                if constexpr (is_2d) {
+                    drop = (p0 > p1) || ((p0 == p1) && cells.ext_get(j).is_2d_gt(p1_x, p1_y));
+                } else {
+                    drop = p0 > p1;
                 }
             }
-        }
 
-        // apply SWA if any
-        if (swa) {
-            if (llama_hparams::is_masked_swa(n_swa, swa_type, p0, p1)) {
-                goto skip;
+            // apply SWA if any
+            if constexpr (swa) {
+                drop = drop || llama_hparams::is_masked_swa(n_swa, swa_type, p0, p1);
+            }
+
+            if constexpr (alibi) {
+                data[j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+            } else {
+                data[j] = drop ? mask_drop : mask_keep;
             }
         }
-
-        if (alibi) {
-            data[j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
-        } else {
-            data[j] = mask_keep;
-        }
-
-        continue;
-skip:
-        data[j] = mask_drop;
     }
 }
 
@@ -1676,14 +1676,11 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
 
             auto & idxs = seq_idxs[seq_id];
 
-            if (!alibi) {
+            if constexpr (!alibi) {
                 if (seq_srct.find(seq_id) != seq_srct.end()) {
                     const uint32_t srct = seq_srct[seq_id];
-
                     const uint64_t idst_prev = n_kv*srct;
-
-                    std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
-
+                    std::memcpy(data + idst, data + idst_prev, n_kv * sizeof(T));
                     prev = true;
                 } else {
                     idxs.clear();
@@ -1700,42 +1697,40 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
     }
 }
 
-template<typename T, bool causal, bool swa, bool is_2d>
-static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
-    const bool alibi = args.hparams.use_alibi;
-    if (alibi) {
-        set_input_kq_mask_impl<T, causal, swa, is_2d, true> (args, data);
-    } else {
-        set_input_kq_mask_impl<T, causal, swa, is_2d, false>(args, data);
-    }
-}
-
 template<typename T, bool causal, bool swa>
 static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
     const bool is_2d = args.ubatch->is_pos_2d();
+    const bool alibi = args.hparams.use_alibi;
     if (is_2d) {
-        set_input_kq_mask_impl<T, causal, swa, true> (args, data);
+        if (alibi) {
+            set_input_kq_mask_impl<T, causal, swa, true, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, causal, swa, true, false>(args, data);
+        }
     } else {
-        set_input_kq_mask_impl<T, causal, swa, false>(args, data);
-    }
-}
-
-template<typename T, bool causal>
-static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
-    const bool swa = args.swa_type != LLAMA_SWA_TYPE_NONE;
-    if (swa) {
-        set_input_kq_mask_impl<T, causal, true> (args, data);
-    } else {
-        set_input_kq_mask_impl<T, causal, false>(args, data);
+        if (alibi) {
+            set_input_kq_mask_impl<T, causal, swa, false, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, causal, swa, false, false>(args, data);
+        }
     }
 }
 
 template<typename T>
 static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data, bool causal_attn) {
+    const bool swa = args.swa_type != LLAMA_SWA_TYPE_NONE;
     if (causal_attn) {
-        set_input_kq_mask_impl<T, true> (args, data);
+        if (swa) {
+            set_input_kq_mask_impl<T, true, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, true, false>(args, data);
+        }
     } else {
-        set_input_kq_mask_impl<T, false>(args, data);
+        if (swa) {
+            set_input_kq_mask_impl<T, false, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, false, false>(args, data);
+        }
     }
 }
 
