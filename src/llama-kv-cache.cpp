@@ -1535,34 +1535,34 @@ struct args_set_input_kq_mask {
     int64_t n_tps;
 };
 
-template <typename T, bool causal, bool swa, bool is_2d, bool alibi>
+template <typename T, bool causal, bool swa, bool is_2d, bool alibi, bool prev>
 static void apply_mask(T *                                                                    data,
-                       const uint32_t                                                         n_swa,
-                       const int64_t                                                          n_kv,
-                       const T                                                                mask_keep,
-                       const T                                                                mask_drop,
-                       llama_pos                                                              seq_pos_min[256],
-                       const llama_seq_id                                                     seq_id,
-                       const std::vector<llama_kv_cells>::value_type &                        cells,
-                       const llama_pos                                                        p1,
-                       const llama_pos                                                        p1_x,
-                       const llama_pos                                                        p1_y,
                        const uint64_t                                                         idst,
-                       llama_pos                                                              swa_lo,
-                       llama_pos                                                              swa_hi,
-                       bool                                                                   prev,
+                       const int64_t                                                          n_kv,
+                       const std::vector<llama_kv_cells>::value_type &                        cells,
+                       const llama_ubatch *                                                   ubatch,
+                       const uint32_t                                                         n_swa,
+                       llama_pos *                                                            seq_pos_min,
+                       const uint32_t                                                         i,
+                       std::pair<llama_pos, llama_pos>                                        _swa_diap,
                        std::unordered_map<llama_seq_id, std::vector<uint32_t>>::mapped_type & idxs) {
+    const T mask_keep  = llama_cast<T>(0.0f);
+    const T mask_drop  = llama_cast<T>(-INFINITY);
+    const llama_pos p1 = ubatch->pos[i];
+    const llama_seq_id seq_id = ubatch->seq_id[i][0];
+    // for M-RoPE
+    const llama_pos p1_x = is_2d ? ubatch->pos[i + ubatch->n_tokens * 2] : 0;
+    const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]     : 0;
+    const auto swa_diap = _swa_diap;
     size_t idxs_size = idxs.size();
     for (uint32_t jj = 0; jj < n_kv; ++jj) {
         uint32_t j = jj;
 
-        if constexpr (!alibi) {
-            if (prev) {
-                if (jj >= idxs_size) {
-                    break;
-                }
-                j = idxs[jj];
+        if constexpr (prev) {
+            if (jj >= idxs_size) {
+                break;
             }
+            j = idxs[jj];
         }
 
         // mask the token if not the same sequence or empty
@@ -1573,8 +1573,8 @@ static void apply_mask(T *                                                      
 
         const llama_pos p0 = cells.pos_get(j);
 
-        if constexpr (!alibi) {
-            if (!prev) {
+        if constexpr(!prev) {
+            if constexpr (!alibi) {
                 // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
                 if (p0 + (int32_t) (n_swa + 32) >= seq_pos_min[seq_id]) {
                     idxs.push_back(j);
@@ -1600,11 +1600,11 @@ static void apply_mask(T *                                                      
 
         // apply SWA masking
         if constexpr (swa) {
+            const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
             if constexpr (alibi) {
-                data[idst + j] =
-                    (p0 < swa_lo || p0 >= swa_hi) ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+                data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
             } else {
-                data[idst + j] = (p0 < swa_lo || p0 >= swa_hi) ? mask_drop : mask_keep;
+                data[idst + j] = drop ? mask_drop : mask_keep;
             }
         } else {
             if constexpr (alibi) {
@@ -1629,9 +1629,6 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
     const int64_t n_stream = args.n_stream;
     const int64_t n_tps    = args.n_tps;
 
-    const T mask_keep = llama_cast<T>(0.0f);
-    const T mask_drop = llama_cast<T>(-INFINITY);
-
     // the min position in the batch for each sequence
     llama_pos seq_pos_min[LLAMA_MAX_SEQ];
     std::fill(seq_pos_min, seq_pos_min + LLAMA_MAX_SEQ, INT32_MAX);
@@ -1652,19 +1649,13 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             const auto & cells = v_cells.at(seq_to_stream[seq_id]);
 
             const llama_pos p1 = ubatch->pos[i];
-            // for M-RoPE
-            const llama_pos p1_x = is_2d ? ubatch->pos[i + ubatch->n_tokens * 2] : 0;
-            const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]     : 0;
 
             const uint64_t idst = n_kv * i;
 
             // Hoist SWA window computation out of the cell loop
-            llama_pos swa_lo = 0, swa_hi = n_kv;
             std::pair<llama_pos, llama_pos> swa_diap {0, 0};
             if constexpr (swa) {
-                auto [lo, hi] = llama_hparams::compute_swa_window(swa_type, n_swa, p1);
-                swa_lo = lo;
-                swa_hi = hi;
+                swa_diap = llama_hparams::compute_swa_window(swa_type, n_swa, p1);
             }
 
             // for tokens of the same sequence, the mask is mostly the same, so we can reuse it
@@ -1673,7 +1664,6 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             // keep track of those cells and shortcut the loop to save time
             // note: this optimization is not compatible with Alibi position encoding
             // ref:  https://github.com/ggml-org/llama.cpp/pull/18842
-            bool prev = false;
             auto & idxs = seq_idxs[seq_id];
 
             if constexpr (!alibi) {
@@ -1681,55 +1671,57 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
                     const uint32_t srct = seq_srct[seq_id];
                     const uint64_t idst_prev = n_kv * srct;
                     std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
-                    prev = true;
+                    apply_mask<T, causal, swa, is_2d, alibi, true>
+                        (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
                 } else {
                     idxs.clear();
                     idxs.reserve(ubatch->n_tokens + n_swa + 32);
                     seq_srct[seq_id] = i;
+                    apply_mask<T, causal, swa, is_2d, alibi, false>
+                        (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
                 }
+            } else {
+                apply_mask<T, causal, swa, is_2d, alibi, false>
+                    (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
             }
-            apply_mask<T, causal, swa, is_2d, alibi>(data, n_swa, n_kv, mask_keep, mask_drop, seq_pos_min, seq_id,
-                                                     cells, p1, p1_x, p1_y, idst, swa_lo, swa_hi, prev, idxs);
         }
-    }
-}
-
-template<typename T, bool causal, bool swa, bool is_2d>
-static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
-    const bool alibi = args.hparams.use_alibi;
-    if (alibi) {
-        set_input_kq_mask_impl<T, causal, swa, is_2d, true> (args, data);
-    } else {
-        set_input_kq_mask_impl<T, causal, swa, is_2d, false>(args, data);
     }
 }
 
 template<typename T, bool causal, bool swa>
 static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
     const bool is_2d = args.ubatch->is_pos_2d();
+    const bool alibi = args.hparams.use_alibi;
     if (is_2d) {
-        set_input_kq_mask_impl<T, causal, swa, true> (args, data);
+        if (alibi) {
+            set_input_kq_mask_impl<T, causal, swa, true, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, causal, swa, true, false>(args, data);
+        }
     } else {
-        set_input_kq_mask_impl<T, causal, swa, false>(args, data);
-    }
-}
-
-template<typename T, bool causal>
-static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data) {
-    const bool swa = args.swa_type != LLAMA_SWA_TYPE_NONE;
-    if (swa) {
-        set_input_kq_mask_impl<T, causal, true> (args, data);
-    } else {
-        set_input_kq_mask_impl<T, causal, false>(args, data);
+        if (alibi) {
+            set_input_kq_mask_impl<T, causal, swa, false, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, causal, swa, false, false>(args, data);
+        }
     }
 }
 
 template<typename T>
 static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data, bool causal_attn) {
+    const bool swa = args.swa_type != LLAMA_SWA_TYPE_NONE;
     if (causal_attn) {
-        set_input_kq_mask_impl<T, true> (args, data);
+        if (swa) {
+            set_input_kq_mask_impl<T, true, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, true, false>(args, data);
+        }
     } else {
-        set_input_kq_mask_impl<T, false>(args, data);
+        if (swa) {
+            set_input_kq_mask_impl<T, false, true> (args, data);
+        } else {
+            set_input_kq_mask_impl<T, false, false>(args, data);
+        }
     }
 }
 
