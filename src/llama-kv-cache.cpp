@@ -1542,7 +1542,7 @@ static void apply_mask(T *                                                      
                        const std::vector<llama_kv_cells>::value_type &                        cells,
                        const llama_ubatch *                                                   ubatch,
                        const uint32_t                                                         n_swa,
-                       llama_pos *                                                            seq_pos_min,
+                       llama_pos                                                              min_p,
                        const uint32_t                                                         i,
                        std::pair<llama_pos, llama_pos>                                        _swa_diap,
                        std::unordered_map<llama_seq_id, std::vector<uint32_t>>::mapped_type & idxs) {
@@ -1554,63 +1554,93 @@ static void apply_mask(T *                                                      
     const llama_pos p1_x = is_2d ? ubatch->pos[i + ubatch->n_tokens * 2] : 0;
     const llama_pos p1_y = is_2d ? ubatch->pos[i + ubatch->n_tokens]     : 0;
     const auto swa_diap = _swa_diap;
-    size_t idxs_size = idxs.size();
-    for (uint32_t jj = 0; jj < n_kv; ++jj) {
-        uint32_t j = jj;
 
-        if constexpr (prev) {
-            if (jj >= idxs_size) {
-                break;
-            }
-            j = idxs[jj];
-        }
+    if constexpr (prev) {
+        const size_t idxs_size = idxs.size();
+        for (uint32_t jj = 0; jj < idxs_size; ++jj) {
+            const uint32_t j = idxs[jj];
 
-        // mask the token if not the same sequence or empty
-        if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
-            data[idst + j] = mask_drop;
-            continue;
-        }
-
-        const llama_pos p0 = cells.pos_get(j);
-
-        if constexpr(!prev) {
-            if constexpr (!alibi) {
-                // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
-                if (p0 + (int32_t) (n_swa + 32) >= seq_pos_min[seq_id]) {
-                    idxs.push_back(j);
-                    ++idxs_size;
-                }
-            }
-        }
-
-        if constexpr (causal) {
-            if (p0 > p1) {  // mask future tokens
+            if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
+                
                 data[idst + j] = mask_drop;
                 continue;
             }
-            if constexpr (is_2d) {
-                if (p0 == p1) {
-                    if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
-                        data[idst + j] = mask_drop;
-                        continue;
+
+            const llama_pos p0 = cells.pos_get(j);
+
+            if constexpr (causal) {
+                if (p0 > p1) { 
+                    data[idst + j] = mask_drop;
+                    continue; 
+                }
+                if constexpr (is_2d) {
+                    if (p0 == p1) {
+                        if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
+                            data[idst + j] = mask_drop;
+                            continue;
+                        }
                     }
                 }
             }
-        }
 
-        // apply SWA masking
-        if constexpr (swa) {
-            const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
-            if constexpr (alibi) {
-                data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
-            } else {
-                data[idst + j] = drop ? mask_drop : mask_keep;
+            if constexpr (swa) {
+                const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
+                if (drop) {
+                    data[idst + j] = mask_drop;
+                    continue;
+                }
             }
-        } else {
             if constexpr (alibi) {
                 data[idst + j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
             } else {
                 data[idst + j] = mask_keep;
+            }
+        }
+    } else {
+        for (uint32_t j = 0; j < n_kv; ++j) {
+            if (cells.is_empty(j) || !cells.seq_has(j, seq_id)) {
+                data[idst + j] = mask_drop;
+                continue;
+            }
+
+            const llama_pos p0 = cells.pos_get(j);
+
+            if constexpr (!alibi) {
+                // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
+                if (p0 + (int32_t) (n_swa + 32) >= min_p) {
+                    idxs.push_back(j);
+                }
+            }
+
+            if constexpr (causal) {
+                if (p0 > p1) {
+                    data[idst + j] = mask_drop;
+                    continue;
+                }
+                if constexpr (is_2d) {
+                    if (p0 == p1) {
+                        if (cells.ext_get(j).is_2d_gt(p1_x, p1_y)) {
+                            data[idst + j] = mask_drop;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // apply SWA masking
+            if constexpr (swa) {
+                const bool drop = p0 < swa_diap.first || p0 >= swa_diap.second;
+                if constexpr (alibi) {
+                    data[idst + j] = drop ? mask_drop : llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+                } else {
+                    data[idst + j] = drop ? mask_drop : mask_keep;
+                }
+            } else {
+                if constexpr (alibi) {
+                    data[idst + j] = llama_cast<T>(static_cast<float>(-std::abs(p0 - p1)));
+                } else {
+                    data[idst + j] = mask_keep;
+                }
             }
         }
     }
@@ -1672,17 +1702,17 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
                     const uint64_t idst_prev = n_kv * srct;
                     std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
                     apply_mask<T, causal, swa, is_2d, alibi, true>
-                        (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
+                        (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
                 } else {
                     idxs.clear();
                     idxs.reserve(ubatch->n_tokens + n_swa + 32);
                     seq_srct[seq_id] = i;
                     apply_mask<T, causal, swa, is_2d, alibi, false>
-                        (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
+                        (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
                 }
             } else {
                 apply_mask<T, causal, swa, is_2d, alibi, false>
-                    (data, idst, n_kv, cells, ubatch, n_swa, &seq_pos_min[0], i, swa_diap, idxs);
+                    (data, idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
             }
         }
     }
