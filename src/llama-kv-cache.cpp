@@ -1540,7 +1540,6 @@ static void apply_mask(T *                                                      
                        const int64_t                                                          n_kv,
                        const std::vector<llama_kv_cells>::value_type &                        cells,
                        const llama_ubatch *                                                   ubatch,
-                       const uint32_t                                                         n_swa,
                        llama_pos                                                              min_p,
                        const uint32_t                                                         i,
                        std::pair<llama_pos, llama_pos>                                        _swa_diap,
@@ -1597,7 +1596,7 @@ static void apply_mask(T *                                                      
 
             if constexpr (!alibi) {
                 // record all cells for which: p0 >= seq_pos_min[seq_id] - n_swa - 32
-                if (p0 + (int32_t) (n_swa + 32) >= min_p) {
+                if (p0 >= min_p) {
                     idxs.push_back(j);
                 }
             }
@@ -1650,13 +1649,10 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
         std::unordered_map<llama_seq_id, uint32_t>              seq_srct;
         std::unordered_map<llama_seq_id, std::vector<uint32_t>> seq_idxs;
 
-        for (uint32_t ii = 0; ii < n_tps; ++ii) {
-            const uint32_t i = s * n_tps + ii;
-            const llama_seq_id seq_id = ubatch->seq_id[i][0];
-            const auto & cells = v_cells.at(seq_to_stream[seq_id]);
-
+        auto seq_ptr = ubatch->seq_id + s * n_tps;
+        for (uint32_t i = s * n_tps; i < s * n_tps + n_tps; ++i, ++seq_ptr) {
+            const llama_seq_id seq_id = (*seq_ptr)[0];
             const llama_pos p1 = ubatch->pos[i];
-
             const uint64_t idst = n_kv * i;
 
             // Hoist SWA window computation out of the cell loop
@@ -1664,6 +1660,7 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             if constexpr (swa) {
                 swa_diap = llama_hparams::compute_swa_window(swa_type, n_swa, p1);
             }
+            const auto & cells = v_cells.at(seq_to_stream[seq_id]);
 
             // for tokens of the same sequence, the mask is mostly the same, so we can reuse it
             // the only cells that could change are the ones that are with similar positions as the
@@ -1672,24 +1669,24 @@ static void set_input_kq_mask_impl(const args_set_input_kq_mask & args, T * data
             // note: this optimization is not compatible with Alibi position encoding
             // ref:  https://github.com/ggml-org/llama.cpp/pull/18842
             auto & idxs = seq_idxs[seq_id];
-
             if constexpr (!alibi) {
                 if (seq_srct.find(seq_id) != seq_srct.end()) {
                     const uint32_t srct = seq_srct[seq_id];
                     const uint64_t idst_prev = n_kv * srct;
                     std::copy(data + idst_prev, data + idst_prev + n_kv, data + idst);
                     apply_mask<T, causal, swa, is_2d, alibi, true>
-                        (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                        (data + idst, n_kv, cells, ubatch, 0, i, swa_diap, idxs);
                 } else {
+                    auto min_p = seq_pos_min[seq_id] - static_cast<llama_pos>(n_swa + 32);
                     idxs.clear();
                     idxs.reserve(ubatch->n_tokens + n_swa + 32);
                     seq_srct[seq_id] = i;
                     apply_mask<T, causal, swa, is_2d, alibi, false>
-                        (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                        (data + idst, n_kv, cells, ubatch, min_p, i, swa_diap, idxs);
                 }
             } else {
                 apply_mask<T, causal, swa, is_2d, alibi, false>
-                    (data + idst, n_kv, cells, ubatch, n_swa, seq_pos_min[seq_id], i, swa_diap, idxs);
+                    (data + idst, n_kv, cells, ubatch, 0, i, swa_diap, idxs);
             }
         }
     }
